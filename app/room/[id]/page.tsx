@@ -12,6 +12,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { Room, Profile } from '@/types/database';
 import { toast } from 'sonner';
+import { Chessboard } from 'react-chessboard';
 import Link from 'next/link';
 
 interface RoomWithProfiles extends Room {
@@ -19,10 +20,43 @@ interface RoomWithProfiles extends Room {
   guest?: Profile;
 }
 
+/* // Profil de test
+const hostProfile: Profile = {
+  id: 'mock-user-1',
+  username: 'Hote',
+  avatar_url: undefined,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  games_played: 42,
+  games_won: 21,
+  rating: 1300,
+  is_online: true,
+  last_seen: new Date().toISOString()
+};
+
+// Profil de test
+const guestProfile: Profile = {
+  id: 'mock-user-2',
+  username: 'Invité',
+  avatar_url: undefined,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  games_played: 42,
+  games_won: 21,
+  rating: 1150,
+  is_online: true,
+  last_seen: new Date().toISOString()
+}; */
+
+
+// Vérification si en développement ou non --> Pour les test
+const isLocalTest = process.env.NODE_ENV === 'development';
+
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const { profile } = useAuth();
+  // const profile = isLocalTest ? hostProfile : useAuth().profile; // Récupération du profil en fonction de si on ets en mode développement ou non
   const [room, setRoom] = useState<RoomWithProfiles | null>(null);
   const [loading, setLoading] = useState(true);
   const [spectatorCount, setSpectatorCount] = useState(0);
@@ -32,20 +66,23 @@ export default function RoomPage() {
   useEffect(() => {
     if (!roomId) return;
 
+    // Récupération des infos à l'ouverture de la salle
     fetchRoom();
     
-    // Subscribe to room changes
+    /* --- Actualisation de la salle a chaque changements en temps réel --- */
     const subscription = supabase
       .channel(`room-${roomId}`)
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
         () => {
+          // Actualisation de la salle
           fetchRoom();
         }
       )
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'spectators', filter: `room_id=eq.${roomId}` },
         () => {
+          // Actualisation de la salle
           fetchSpectators();
         }
       )
@@ -56,10 +93,12 @@ export default function RoomPage() {
     };
   }, [roomId]);
 
+  /* --- Récupération des informations de la salle --- */
   const fetchRoom = async () => {
     try {
       const { data, error } = await supabase
         .from('rooms')
+        // Récupération de l'hote et de l'invité
         .select(`
           *,
           host:profiles!rooms_host_id_fkey(*),
@@ -68,6 +107,7 @@ export default function RoomPage() {
         .eq('id', roomId)
         .single();
 
+      // Cas où aucune salle n'est trouvée --> Retour à l'accueil
       if (error) {
         if (error.code === 'PGRST116') {
           toast.error('Cette salle n\'existe pas');
@@ -77,8 +117,28 @@ export default function RoomPage() {
         throw error;
       }
 
+      // Room locale pour test
+      /* if (isLocalTest) {
+        setRoom({
+          id: 'room-1',
+          name: 'Salle de Test',
+          room_code: 'TEST123',
+          status: 'waiting',
+          time_control: '5+3',
+          is_private: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          max_spectators: 10,
+          host_id: hostProfile.id,
+          guest_id: guestProfile.id,
+          host: hostProfile,
+          guest: guestProfile
+        });
+        setSpectatorCount(3);
+      } */
       setRoom(data as RoomWithProfiles);
       fetchSpectators();
+
     } catch (error) {
       console.error('Error fetching room:', error);
       toast.error('Erreur lors du chargement de la salle');
@@ -87,20 +147,29 @@ export default function RoomPage() {
     }
   };
 
+  /* --- Compteur du nombre de spectateurs --- */
   const fetchSpectators = async () => {
     try {
       const { count, error } = await supabase
         .from('spectators')
-        .select('*', { count: 'exact', head: true })
+        .select('*', { count: 'exact', head: true }) // Nombre total d'utilisateurs
         .eq('room_id', roomId);
 
       if (error) throw error;
-      setSpectatorCount(count || 0);
+
+      if (isLocalTest) {
+        setSpectatorCount(3);
+        return;
+      } else {
+        setSpectatorCount(count || 0);
+      }
+
     } catch (error) {
       console.error('Error fetching spectators:', error);
     }
   };
 
+  /* --- Fonction permettant de rejoindre la salle en tant que spectateur --- */
   const joinAsSpectator = async () => {
     if (!profile || !room) return;
 
@@ -112,6 +181,7 @@ export default function RoomPage() {
           user_id: profile.id,
         });
 
+      // 23505 = Conflit unique --> Utilisateur déja spectateur
       if (error) {
         if (error.code === '23505') {
           toast.info('Vous êtes déjà spectateur de cette partie');
@@ -127,6 +197,7 @@ export default function RoomPage() {
     }
   };
 
+  /* --- Copie du code d’accès à la salle --- */
   const copyRoomCode = () => {
     if (room?.room_code) {
       navigator.clipboard.writeText(room.room_code);
@@ -134,6 +205,7 @@ export default function RoomPage() {
     }
   };
 
+  /* --- Copie le lien complet de la salle --- */
   const shareRoom = () => {
     const url = window.location.href;
     navigator.clipboard.writeText(url);
@@ -244,26 +316,32 @@ export default function RoomPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Game Board Area */}
           <div className="lg:col-span-2">
-            <Card className="glass-effect border-white/10 h-96">
-              <CardContent className="p-6 flex items-center justify-center h-full">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Users className="h-8 w-8 text-blue-400" />
+            {room.host_id && room.guest_id ? (
+              <div>
+                <Chessboard id="BasicBoard" />
+              </div>
+            ) : (
+              <Card className="glass-effect border-white/10 h-96">
+                <CardContent className="p-6 flex items-center justify-center h-full">
+                  <div className="text-center">
+                    <div className="w-16 h-16 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Users className="h-8 w-8 text-blue-400" />
+                    </div>
+                    <h3 className="text-xl font-semibold text-white mb-2">
+                      Plateau d'Échecs
+                    </h3>
+                    <p className="text-slate-400 mb-4">
+                      Le plateau d'échecs sera affiché ici une fois la partie commencée
+                    </p>
+                    {room.status === 'waiting' && (
+                      <Badge variant="secondary" className="bg-yellow-600/20 text-yellow-400 border-yellow-400/50">
+                        En attente d'un adversaire...
+                      </Badge>
+                    )}
                   </div>
-                  <h3 className="text-xl font-semibold text-white mb-2">
-                    Plateau d'Échecs
-                  </h3>
-                  <p className="text-slate-400 mb-4">
-                    Le plateau d'échecs sera affiché ici une fois la partie commencée
-                  </p>
-                  {room.status === 'waiting' && (
-                    <Badge variant="secondary" className="bg-yellow-600/20 text-yellow-400 border-yellow-400/50">
-                      En attente d'un adversaire...
-                    </Badge>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {/* Sidebar */}
