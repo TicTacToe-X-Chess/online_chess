@@ -57,10 +57,12 @@ export default function HomePage() {
                 Commencer à Jouer
               </Button>
             </Link>
-            <Button size="lg" variant="outline" className="border-white/20 hover:bg-white/10 text-lg px-8 py-6">
-              <Crown className="mr-2 h-5 w-5" />
-              Voir le Classement
-            </Button>
+            <Link href="/dashboard">
+              <Button size="lg" variant="outline" className="border-white/20 hover:bg-white/10 text-lg px-8 py-6">
+                <Crown className="mr-2 h-5 w-5" />
+                Voir le Classement
+              </Button>
+            </Link>
           </div>
         </div>
       </section>
