@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { Room, Profile } from '@/types/database';
 import { toast } from 'sonner';
 import { Chessboard } from 'react-chessboard';
+import { useChessEngine } from '@/hooks/useChessEngine';
 import Link from 'next/link';
 
 interface RoomWithProfiles extends Room {
@@ -62,6 +63,16 @@ export default function RoomPage() {
   const [spectatorCount, setSpectatorCount] = useState(0);
 
   const roomId = params.id as string;
+
+  // Initialisation de l'echiquier
+  const {
+    fen,
+    makeMove,
+    resetGame,
+    history,
+    isGameOver,
+    turn
+  } = useChessEngine();
 
   useEffect(() => {
     if (!roomId) return;
@@ -117,8 +128,8 @@ export default function RoomPage() {
         throw error;
       }
 
-      // Room locale pour test
-      /* if (isLocalTest) {
+      /* // Room locale pour test
+      if (isLocalTest) {
         setRoom({
           id: 'room-1',
           name: 'Salle de Test',
@@ -318,7 +329,13 @@ export default function RoomPage() {
           <div className="lg:col-span-2">
             {room.host_id && room.guest_id ? (
               <div>
-                <Chessboard id="BasicBoard" />
+                <Chessboard 
+                  position={fen}
+                  onPieceDrop={(sourceSquare, targetSquare) => {
+                    const move = makeMove({ from: sourceSquare, to: targetSquare, promotion: 'q' });
+                    return move !== null;
+                  }}
+                />
               </div>
             ) : (
               <Card className="glass-effect border-white/10 h-96">
