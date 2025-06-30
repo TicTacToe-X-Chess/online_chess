@@ -32,9 +32,6 @@ export function Header() {
         </Link>
 
         <nav className="hidden md:flex items-center space-x-6">
-          <Link href="/" className="text-sm font-medium hover:text-blue-400 transition-colors">
-            Accueil
-          </Link>
           {isAuthenticated && (
             <>
               <Link href="/dashboard" className="text-sm font-medium hover:text-blue-400 transition-colors">
@@ -51,7 +48,7 @@ export function Header() {
           {isAuthenticated && profile ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost\" className="flex items-center space-x-2 hover:bg-white/10">
+                <Button variant="ghost" className="flex items-center space-x-2 hover:bg-white/10">
                   <Avatar className="h-8 w-8">
                     <AvatarFallback className="bg-blue-600 text-white">
                       {profile.username.charAt(0).toUpperCase()}
