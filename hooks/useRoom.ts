@@ -2,8 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Room, Profile } from '@/types/database';
+import { Room } from '@/types/database';
 import { useAuth } from '@/hooks/useAuth';
+import { RealtimeChannel } from '@supabase/supabase-js';
+import {Profiler} from "node:inspector";
+
 
 export interface RoomParticipant {
     id: string;
@@ -231,14 +234,75 @@ export function useRoom(roomId?: string) {
             setLoading(false);
         }
     };
+    type RealtimePayload<T> = {
+        old?: T;
+        new?: T;
+    };
 
     useEffect(() => {
-        if (roomId) {
-            fetchRoom(roomId);
-        } else {
-            setLoading(false);
-        }
+        if (!roomId) return;
+
+        fetchRoom(roomId);
+
+        // Crée un channel realtime pour la room
+        const roomChannel: RealtimeChannel = supabase
+            .channel(`room-${roomId}`)
+            .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
+                (payload) => {
+                    setRoom(prev => prev ? { ...prev, ...payload.new } : prev);
+                }
+            )
+            .subscribe();
+
+        // Crée un autre channel pour les participants
+        const participantsChannel: RealtimeChannel = supabase
+            .channel(`room-participants-${roomId}`)
+            .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'room_participants', filter: `room_id=eq.${roomId}` },
+                (payload) => {
+                    setRoom(prev => prev ? {
+                        ...prev,
+                        participants: [...prev.participants, { ...payload.new!, profile: payload.new!.profile }] as RoomParticipant[]
+                    } : prev);
+
+
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'room_participants', filter: `room_id=eq.${roomId}` },
+                (payload) => {
+                    setRoom(prev => {
+                        if (!prev) return prev;
+                        const updatedParticipants = prev.participants.map(p =>
+                            p.id === payload.new.id ? { ...p, ...payload.new } : p
+                        );
+                        return { ...prev, participants: updatedParticipants };
+                    });
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: 'DELETE', schema: 'public', table: 'room_participants', filter: `room_id=eq.${roomId}` },
+                (payload) => {
+                    setRoom(prev => {
+                        if (!prev) return prev;
+                        const filteredParticipants = prev.participants.filter(p => p.id !== payload.old.id);
+                        return { ...prev, participants: filteredParticipants };
+                    });
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(roomChannel);
+            supabase.removeChannel(participantsChannel);
+        };
     }, [roomId]);
+
 
     return {
         room,
