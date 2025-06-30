@@ -5,8 +5,6 @@ import { supabase } from '@/lib/supabase';
 import { Room } from '@/types/database';
 import { useAuth } from '@/hooks/useAuth';
 import { RealtimeChannel } from '@supabase/supabase-js';
-import {Profiler} from "node:inspector";
-
 
 export interface RoomParticipant {
     id: string;
@@ -18,6 +16,8 @@ export interface RoomParticipant {
     is_active: boolean;
     profile: Profile;
 }
+
+class Profile {}
 
 export interface RoomWithParticipants extends Room {
     participants: RoomParticipant[];
@@ -33,11 +33,7 @@ export function useRoom(roomId?: string) {
 
     const generateRoomCode = (): string => {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        let result = '';
-        for (let i = 0; i < 6; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return result;
+        return Array.from({ length: 6 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
     };
 
     const createRoom = async (roomData: {
@@ -46,114 +42,95 @@ export function useRoom(roomId?: string) {
         timeControl: string;
         maxSpectators: number;
     }) => {
-        // TEMP : désactive la vérification du profil
-        // if (!profile) {
-        //     throw new Error('User must be authenticated to create a room');
-        // }
+        const roomCode = roomData.isPrivate ? generateRoomCode() : null;
 
-        try {
-            const roomCode = roomData.isPrivate ? generateRoomCode() : null;
+        const fakeRoom: Room = {
+            id: Math.random().toString(36).substring(2, 10),
+            name: roomData.name,
+            host_id: profile?.id || 'mock-user-id',
+            guest_id: undefined,
+            is_private: roomData.isPrivate,
+            room_code: roomCode ?? undefined,
+            status: 'waiting',
+            max_spectators: roomData.maxSpectators,
+            time_control: roomData.timeControl,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        };
 
-            // Retourne une fausse room simulée
-            const fakeRoom: Room = {
-                id: Math.random().toString(36).substring(2, 10),
-                name: roomData.name,
-                host_id: profile?.id || 'mock-user-id',
-                guest_id: undefined, // ✅ au lieu de null
-                is_private: roomData.isPrivate,
-                room_code: roomCode ?? undefined,
-                status: 'waiting',
-                max_spectators: roomData.maxSpectators,
-                time_control: roomData.timeControl,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-            };
-
-
-            return fakeRoom;
-        } catch (error: any) {
-            throw new Error(error.message || 'Failed to create room');
-        }
+        return fakeRoom;
     };
 
     const joinRoom = async (roomId: string, roomCode?: string) => {
-        if (!profile) {
-            throw new Error('User must be authenticated to join a room');
+        if (!profile) throw new Error('User must be authenticated to join a room');
+
+        const { data: roomData, error: roomError } = await supabase
+            .from('rooms')
+            .select('*, host:profiles!rooms_host_id_fkey(*)')
+            .eq('id', roomId)
+            .single();
+
+        if (roomError) throw roomError;
+
+        if (roomData.is_private && roomData.room_code !== roomCode) {
+            throw new Error('Invalid room code');
         }
 
-        try {
-            // Check if room exists and is joinable
-            const { data: roomData, error: roomError } = await supabase
+        if (roomData.status !== 'waiting') {
+            throw new Error('Room is not accepting new players');
+        }
+
+        const { data: existingParticipant } = await supabase
+            .from('room_participants')
+            .select('*')
+            .eq('room_id', roomId)
+            .eq('user_id', profile.id)
+            .eq('is_active', true)
+            .single();
+
+        if (existingParticipant) {
+            throw new Error('You are already in this room');
+        }
+
+        const { data: participants } = await supabase
+            .from('room_participants')
+            .select('role')
+            .eq('room_id', roomId)
+            .eq('is_active', true);
+
+        const hasPlayer = participants?.some(p => p.role === 'player');
+        const role = hasPlayer ? 'spectator' : 'player';
+
+        const { error: participantError } = await supabase
+            .from('room_participants')
+            .insert({
+                room_id: roomId,
+                user_id: profile.id,
+                role,
+            });
+
+        if (participantError) throw participantError;
+
+        if (role === 'player' && !roomData.guest_id) {
+            const { error: updateError } = await supabase
                 .from('rooms')
-                .select('*, host:profiles!rooms_host_id_fkey(*)')
-                .eq('id', roomId)
-                .single();
+                .update({
+                    guest_id: profile.id,
+                    status: 'playing',
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', roomId);
 
-            if (roomError) throw roomError;
-
-            if (roomData.is_private && roomData.room_code !== roomCode) {
-                throw new Error('Invalid room code');
-            }
-
-            if (roomData.status !== 'waiting') {
-                throw new Error('Room is not accepting new players');
-            }
-
-            const { data: existingParticipant } = await supabase
-                .from('room_participants')
-                .select('*')
-                .eq('room_id', roomId)
-                .eq('user_id', profile.id)
-                .eq('is_active', true)
-                .single();
-
-            if (existingParticipant) {
-                throw new Error('You are already in this room');
-            }
-
-            const { data: participants } = await supabase
-                .from('room_participants')
-                .select('role')
-                .eq('room_id', roomId)
-                .eq('is_active', true);
-
-            const hasPlayer = participants?.some(p => p.role === 'player');
-            const role = hasPlayer ? 'spectator' : 'player';
-
-            const { error: participantError } = await supabase
-                .from('room_participants')
-                .insert({
-                    room_id: roomId,
-                    user_id: profile.id,
-                    role,
-                });
-
-            if (participantError) throw participantError;
-
-            if (role === 'player' && !roomData.guest_id) {
-                const { error: updateError } = await supabase
-                    .from('rooms')
-                    .update({
-                        guest_id: profile.id,
-                        status: 'playing',
-                        updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', roomId);
-
-                if (updateError) throw updateError;
-            }
-
-            return { success: true, role };
-        } catch (error: any) {
-            throw new Error(error.message || 'Failed to join room');
+            if (updateError) throw updateError;
         }
+
+        return { success: true, role };
     };
 
     const leaveRoom = async (roomId: string) => {
         if (!profile) return;
 
         try {
-            // Mark participant as inactive
             const { error } = await supabase
                 .from('room_participants')
                 .update({
@@ -197,10 +174,10 @@ export function useRoom(roomId?: string) {
             const { data, error } = await supabase
                 .from('rooms')
                 .select(`
-          *,
-          host:profiles!rooms_host_id_fkey(*),
-          guest:profiles!rooms_guest_id_fkey(*)
-        `)
+                    *,
+                    host:profiles!rooms_host_id_fkey(*),
+                    guest:profiles!rooms_guest_id_fkey(*)
+                `)
                 .eq('id', id)
                 .single();
 
@@ -209,9 +186,9 @@ export function useRoom(roomId?: string) {
             const { data: participants, error: participantsError } = await supabase
                 .from('room_participants')
                 .select(`
-          *,
-          profile:profiles(*)
-        `)
+                    *,
+                    profile:profiles(*)
+                `)
                 .eq('room_id', id)
                 .eq('is_active', true)
                 .order('joined_at', { ascending: true });
@@ -234,43 +211,81 @@ export function useRoom(roomId?: string) {
             setLoading(false);
         }
     };
-    type RealtimePayload<T> = {
-        old?: T;
-        new?: T;
-    };
 
     useEffect(() => {
         if (!roomId) return;
 
         fetchRoom(roomId);
 
-        // Crée un channel realtime pour la room
         const roomChannel: RealtimeChannel = supabase
             .channel(`room-${roomId}`)
             .on(
                 'postgres_changes',
                 { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
-                (payload) => {
-                    setRoom(prev => prev ? { ...prev, ...payload.new } : prev);
+                async (payload) => {
+                    const updatedRoom = payload.new;
+
+                    if (!updatedRoom) return;
+
+                    if (updatedRoom.guest_id && !room?.guest) {
+                        const { data: guestProfile } = await supabase
+                            .from('profiles')
+                            .select('*')
+                            .eq('id', updatedRoom.guest_id)
+                            .single();
+
+                        setRoom(prev =>
+                            prev
+                                ? {
+                                    ...prev,
+                                    ...updatedRoom,
+                                    guest: guestProfile || prev.guest,
+                                }
+                                : prev
+                        );
+                    } else if (!updatedRoom.guest_id) {
+                        setRoom(prev => (prev ? { ...prev, ...updatedRoom, guest: undefined } : prev));
+                    } else {
+                        setRoom(prev => (prev ? { ...prev, ...updatedRoom } : prev));
+                    }
                 }
             )
             .subscribe();
 
-        // Crée un autre channel pour les participants
         const participantsChannel: RealtimeChannel = supabase
             .channel(`room-participants-${roomId}`)
             .on(
                 'postgres_changes',
                 { event: 'INSERT', schema: 'public', table: 'room_participants', filter: `room_id=eq.${roomId}` },
-                (payload) => {
-                    setRoom(prev => prev ? {
-                        ...prev,
-                        participants: [...prev.participants, { ...payload.new!, profile: payload.new!.profile }] as RoomParticipant[]
-                    } : prev);
+                async (payload) => {
+                    const participantRaw = payload.new;
 
+                    // Récupération manuelle du profil depuis la table profiles
+                    const { data: profileData, error } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', participantRaw.user_id)
+                        .single();
 
+                    if (error || !profileData) return;
+
+                    const participant: RoomParticipant = {
+                        ...participantRaw,
+                        profile: profileData,
+                        id: '',
+                        room_id: '',
+                        user_id: '',
+                        role: 'player',
+                        joined_at: '',
+                        is_active: false
+                    };
+
+                    setRoom(prev =>
+                        prev ? { ...prev, participants: [...prev.participants, participant] } : prev
+                    );
                 }
             )
+
             .on(
                 'postgres_changes',
                 { event: 'UPDATE', schema: 'public', table: 'room_participants', filter: `room_id=eq.${roomId}` },
@@ -302,7 +317,6 @@ export function useRoom(roomId?: string) {
             supabase.removeChannel(participantsChannel);
         };
     }, [roomId]);
-
 
     return {
         room,

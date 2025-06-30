@@ -63,16 +63,13 @@ export default function DashboardPage() {
   const fetchRooms = async () => {
     try {
       const { data, error } = await supabase
-        .from('rooms')
-        .select(`
-          *,
-          host:user_public!rooms_host_id_fkey(pseudo),
-          guest:user_public!rooms_guest_id_fkey(pseudo)
-        `)
-        .eq('status', 'waiting')
-        .eq('is_private', false)
-        .order('created_at', { ascending: false })
-        .limit(10);
+          .from('rooms')
+          .select('*')
+          .eq('status', 'waiting')
+          .eq('is_private', false)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
 
       if (error) throw error;
       setRooms(data || []);
