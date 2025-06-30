@@ -80,6 +80,41 @@ export interface Database {
           time_control?: string;
         };
       };
+      room_participants: {
+        Row: {
+          id: string;
+          room_id: string;
+          user_id: string;
+          role: 'host' | 'player' | 'spectator';
+          joined_at: string;
+          left_at?: string;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          room_id: string;
+          user_id: string;
+          role?: 'host' | 'player' | 'spectator';
+          joined_at?: string;
+          left_at?: string;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          room_id?: string;
+          user_id?: string;
+          role?: 'host' | 'player' | 'spectator';
+          joined_at?: string;
+          left_at?: string;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       games: {
         Row: {
           id: string;
@@ -162,5 +197,6 @@ export interface Database {
 
 export type Profile = Database['public']['Tables']['profiles']['Row'];
 export type Room = Database['public']['Tables']['rooms']['Row'];
+export type RoomParticipant = Database['public']['Tables']['room_participants']['Row'];
 export type Game = Database['public']['Tables']['games']['Row'];
 export type Spectator = Database['public']['Tables']['spectators']['Row'];
