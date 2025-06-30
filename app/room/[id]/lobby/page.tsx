@@ -24,7 +24,15 @@ export default function RoomLobbyPage() {
         const loadRoom = async () => {
             try {
                 setLoading(true);
-                await fetchRoom(roomId);
+                const fetchedRoom = await fetchRoom(roomId);
+
+                if (!fetchedRoom) {
+                    toast.error('Salle introuvable');
+                    router.push('/dashboard');
+                    return;
+                }
+
+                setRoom(fetchedRoom);
             } catch (error: any) {
                 console.error('Error loading room:', error);
                 toast.error('Impossible de charger la salle');
@@ -39,7 +47,7 @@ export default function RoomLobbyPage() {
         }
     }, [roomId, fetchRoom, router]);
 
-    // Redirect if room status changes to playing
+    // Rediriger si la partie a déjà commencé
     useEffect(() => {
         if (room?.status === 'playing') {
             router.push(`/room/${roomId}/game`);
