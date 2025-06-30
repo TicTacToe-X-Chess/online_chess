@@ -21,7 +21,7 @@ interface RoomWithProfiles extends Room {
   guest?: Profile;
 }
 
-/* // Profil de test
+// Profil de test
 const hostProfile: Profile = {
   id: 'mock-user-1',
   username: 'Hote',
@@ -47,22 +47,21 @@ const guestProfile: Profile = {
   rating: 1150,
   is_online: true,
   last_seen: new Date().toISOString()
-}; */
-
+}; 
 
 // Vérification si en développement ou non --> Pour les test
 const isLocalTest = process.env.NODE_ENV === 'development';
+//const isLocalTest = false;
+
 
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
-  const { profile } = useAuth();
-  // const profile = isLocalTest ? hostProfile : useAuth().profile; // Récupération du profil en fonction de si on ets en mode développement ou non
+  const profile = isLocalTest ? hostProfile : useAuth().profile;
+  const roomId = params.id as string;
   const [room, setRoom] = useState<RoomWithProfiles | null>(null);
   const [loading, setLoading] = useState(true);
   const [spectatorCount, setSpectatorCount] = useState(0);
-
-  const roomId = params.id as string;
 
   // Initialisation de l'echiquier
   const {
@@ -71,6 +70,7 @@ export default function RoomPage() {
     resetGame,
     history,
     isGameOver,
+    gameReason,
     turn
   } = useChessEngine();
 
@@ -107,34 +107,13 @@ export default function RoomPage() {
   /* --- Récupération des informations de la salle --- */
   const fetchRoom = async () => {
     try {
-      const { data, error } = await supabase
-        .from('rooms')
-        // Récupération de l'hote et de l'invité
-        .select(`
-          *,
-          host:profiles!rooms_host_id_fkey(*),
-          guest:profiles!rooms_guest_id_fkey(*)
-        `)
-        .eq('id', roomId)
-        .single();
-
-      // Cas où aucune salle n'est trouvée --> Retour à l'accueil
-      if (error) {
-        if (error.code === 'PGRST116') {
-          toast.error('Cette salle n\'existe pas');
-          router.push('/dashboard');
-          return;
-        }
-        throw error;
-      }
-
-      /* // Room locale pour test
+      // Cas de test ou non
       if (isLocalTest) {
         setRoom({
           id: 'room-1',
           name: 'Salle de Test',
           room_code: 'TEST123',
-          status: 'waiting',
+          status: 'finished',
           time_control: '5+3',
           is_private: true,
           created_at: new Date().toISOString(),
@@ -143,13 +122,32 @@ export default function RoomPage() {
           host_id: hostProfile.id,
           guest_id: guestProfile.id,
           host: hostProfile,
-          guest: guestProfile
+          guest: guestProfile,
         });
         setSpectatorCount(3);
-      } */
-      setRoom(data as RoomWithProfiles);
-      fetchSpectators();
+      } else {
+        const { data, error } = await supabase
+          .from('rooms')
+          .select(`
+            *,
+            host:profiles!rooms_host_id_fkey(*),
+            guest:profiles!rooms_guest_id_fkey(*)
+          `)
+          .eq('id', roomId)
+          .single();
 
+        if (error) {
+          if (error.code === 'PGRST116') {
+            toast.error('Cette salle n\'existe pas');
+            router.push('/dashboard');
+            return;
+          }
+          throw error;
+        }
+
+        setRoom(data as RoomWithProfiles);
+        fetchSpectators();
+      }
     } catch (error) {
       console.error('Error fetching room:', error);
       toast.error('Erreur lors du chargement de la salle');
@@ -163,17 +161,12 @@ export default function RoomPage() {
     try {
       const { count, error } = await supabase
         .from('spectators')
-        .select('*', { count: 'exact', head: true }) // Nombre total d'utilisateurs
+        .select('*', { count: 'exact', head: true })
         .eq('room_id', roomId);
 
       if (error) throw error;
 
-      if (isLocalTest) {
-        setSpectatorCount(3);
-        return;
-      } else {
-        setSpectatorCount(count || 0);
-      }
+      setSpectatorCount(isLocalTest ? 3 : (count ?? 0));
 
     } catch (error) {
       console.error('Error fetching spectators:', error);
@@ -185,7 +178,7 @@ export default function RoomPage() {
     if (!profile || !room) return;
 
     try {
-      const { error } = await supabase
+      /* const { error } = await supabase
         .from('spectators')
         .insert({
           room_id: roomId,
@@ -201,7 +194,7 @@ export default function RoomPage() {
         throw error;
       }
 
-      toast.success('Vous regardez maintenant cette partie');
+      toast.success('Vous regardez maintenant cette partie'); */
     } catch (error) {
       console.error('Error joining as spectator:', error);
       toast.error('Impossible de rejoindre en tant que spectateur');
@@ -256,10 +249,11 @@ export default function RoomPage() {
     );
   }
 
+  // Vérification des joueurs présents dans la salle
   const isHost = profile?.id === room.host_id;
   const isGuest = profile?.id === room.guest_id;
   const isPlayer = isHost || isGuest;
-  const canJoin = !room.guest_id && !isHost && room.status === 'waiting';
+  const canJoin = !room.guest_id && isHost && room.status === 'waiting';
 
   return (
     <div className="min-h-screen">
@@ -328,15 +322,32 @@ export default function RoomPage() {
           {/* Game Board Area */}
           <div className="lg:col-span-2">
             {room.host_id && room.guest_id ? (
+              <>
               <div>
-                <Chessboard 
+                <Chessboard
                   position={fen}
                   onPieceDrop={(sourceSquare, targetSquare) => {
                     const move = makeMove({ from: sourceSquare, to: targetSquare, promotion: 'q' });
                     return move !== null;
-                  }}
-                />
+                  } } />
               </div>
+              <Card className="glass-effect border-white/10 mt-4">
+                <CardHeader>
+                  <CardTitle className="text-white">Historique des Coups</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {history.length === 0 ? (
+                    <p className="text-slate-400">Aucun coup joué pour l’instant.</p>
+                  ) : (
+                    <ol className="text-white space-y-1 text-sm list-decimal list-inside">
+                      {history.map((move, index) => (
+                        <li key={index}>{move}</li>
+                      ))}
+                    </ol>
+                  )}
+                </CardContent>
+              </Card>
+              </>
             ) : (
               <Card className="glass-effect border-white/10 h-96">
                 <CardContent className="p-6 flex items-center justify-center h-full">
@@ -360,6 +371,26 @@ export default function RoomPage() {
               </Card>
             )}
           </div>
+
+          {isGameOver && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-2xl w-[90%] max-w-md text-center">
+                <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-white">
+                  Partie terminée
+                </h2>
+                <p className="text-gray-600 dark:text-gray-300 mb-6">
+                  {turn === 'w' ? 'Victoire des noirs' : 'Victoire des blancs'}
+                </p>
+                <p>{gameReason}</p>
+                <button
+                  onClick={resetGame}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition"
+                >
+                  Rejouer
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Sidebar */}
           <div className="space-y-6">
