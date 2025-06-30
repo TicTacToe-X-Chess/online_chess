@@ -12,10 +12,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/hooks/useAuth';
+import { useUserRanking } from '@/hooks/useUserRanking';
 import Link from 'next/link';
 
 export function Header() {
   const { profile, signOut, isAuthenticated } = useAuth();
+  const { ranking } = useUserRanking(profile?.id || null);
 
   const handleSignOut = async () => {
     await signOut();
@@ -51,13 +53,13 @@ export function Header() {
                 <Button variant="ghost" className="flex items-center space-x-2 hover:bg-white/10">
                   <Avatar className="h-8 w-8">
                     <AvatarFallback className="bg-blue-600 text-white">
-                      {profile.username.charAt(0).toUpperCase()}
+                      {profile.pseudo.charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                   <div className="hidden sm:flex flex-col items-start">
-                    <span className="text-sm font-medium">{profile.username}</span>
+                    <span className="text-sm font-medium">{profile.pseudo}</span>
                     <Badge variant="secondary" className="text-xs">
-                      {profile.rating} ELO
+                      {ranking?.elo_rating || 400} ELO
                     </Badge>
                   </div>
                 </Button>
@@ -66,9 +68,9 @@ export function Header() {
                 <DropdownMenuItem className="flex items-center space-x-2">
                   <User className="h-4 w-4" />
                   <div className="flex flex-col">
-                    <span>{profile.username}</span>
+                    <span>{profile.pseudo}</span>
                     <span className="text-xs text-muted-foreground">
-                      {profile.games_played} parties • {profile.games_won} victoires
+                      {ranking ? `${ranking.games_played} parties • ${ranking.games_won} victoires` : 'Chargement...'}
                     </span>
                   </div>
                 </DropdownMenuItem>
@@ -80,11 +82,18 @@ export function Header() {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Link href="/auth">
-              <Button className="chess-gradient hover:opacity-90 transition-opacity">
-                Se connecter
-              </Button>
-            </Link>
+            <div className="flex items-center space-x-2">
+              <Link href="/auth/login">
+                <Button variant="outline" className="border-white/20 hover:bg-white/10">
+                  Se connecter
+                </Button>
+              </Link>
+              <Link href="/auth/register">
+                <Button className="chess-gradient hover:opacity-90 transition-opacity">
+                  S'inscrire
+                </Button>
+              </Link>
+            </div>
           )}
         </div>
       </div>

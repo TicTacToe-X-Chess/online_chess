@@ -1,173 +1,117 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import { User } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
-import { Profile } from '@/types/database';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
-interface AuthState {
-  user: User | null;
-  profile: Profile | null;
-  loading: boolean;
+interface UserProfile {
+  id: string;
+  email: string;
+  pseudo: string;
+  created_at: string;
+  last_connection: string;
 }
 
 export function useAuth() {
-  const [authState, setAuthState] = useState<AuthState>({
-    user: null,
-    profile: null,
-    loading: true,
-  });
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const supabase = createClient();
+  const router = useRouter();
 
   useEffect(() => {
-    // Get initial session
-    const getInitialSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session?.user) {
-        const profile = await fetchProfile(session.user.id);
-        setAuthState({
-          user: session.user,
-          profile,
-          loading: false,
-        });
-      } else {
-        setAuthState({
-          user: null,
-          profile: null,
-          loading: false,
-        });
+    // Récupérer l'utilisateur actuel
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user);
+
+      if (user) {
+        // Récupérer le profil utilisateur
+        const { data: profile } = await supabase
+          .from('user_public')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+        
+        setProfile(profile);
       }
+      
+      setLoading(false);
     };
 
-    getInitialSession();
+    getUser();
 
-    // Listen for auth changes
+    // Écouter les changements d'authentification
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (session?.user) {
-          const profile = await fetchProfile(session.user.id);
-          setAuthState({
-            user: session.user,
-            profile,
-            loading: false,
-          });
-        } else {
-          setAuthState({
-            user: null,
-            profile: null,
-            loading: false,
-          });
+        console.log('Auth state change:', event, session?.user?.id);
+        
+        setUser(session?.user ?? null);
+
+        if (event === 'SIGNED_IN' && session?.user) {
+          console.log('User signed in, fetching profile...');
+          
+          // Récupérer le profil lors de la connexion
+          const { data: profile, error: profileError } = await supabase
+            .from('user_public')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+          
+          if (profileError) {
+            console.error('Error fetching profile:', profileError);
+          } else {
+            console.log('Profile fetched:', profile);
+            setProfile(profile);
+          }
+
+          // Mettre à jour last_connection
+          try {
+            await supabase
+              .from('user_public')
+              .update({ 
+                last_connection: new Date().toISOString()
+              })
+              .eq('id', session.user.id);
+          } catch (error) {
+            console.error('Error updating last_connection:', error);
+          }
+
+          // Redirection automatique vers le dashboard avec un délai
+          console.log('Redirecting to dashboard...');
+          setTimeout(() => {
+            router.push('/dashboard');
+            router.refresh(); // Force le refresh de la page
+          }, 1000);
         }
+
+        if (event === 'SIGNED_OUT') {
+          console.log('User signed out');
+          setProfile(null);
+          router.push('/');
+        }
+
+        setLoading(false);
       }
     );
 
     return () => subscription.unsubscribe();
-  }, []);
-
-  const fetchProfile = async (userId: string): Promise<Profile | null> => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-      return null;
-    }
-  };
-
-  const signInWithUsername = async (username: string) => {
-    try {
-      // Create a temporary email based on username
-      const email = `${username.toLowerCase()}@chess.local`;
-      const password = 'temporary-password-123';
-
-      // Try to sign in first
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (signInError && signInError.message.includes('Invalid login credentials')) {
-        // User doesn't exist, create account
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (signUpError) throw signUpError;
-
-        if (signUpData.user) {
-          // Create profile
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .insert({
-              id: signUpData.user.id,
-              username,
-              games_played: 0,
-              games_won: 0,
-              rating: 1200,
-              is_online: true,
-              last_seen: new Date().toISOString(),
-            });
-
-          if (profileError) throw profileError;
-        }
-
-        return { success: true, data: signUpData };
-      } else if (signInError) {
-        throw signInError;
-      }
-
-      // Update online status
-      if (signInData.user) {
-        await supabase
-          .from('profiles')
-          .update({
-            is_online: true,
-            last_seen: new Date().toISOString(),
-          })
-          .eq('id', signInData.user.id);
-      }
-
-      return { success: true, data: signInData };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
-  };
+  }, [supabase, router]);
 
   const signOut = async () => {
     try {
-      if (authState.user) {
-        // Update online status before signing out
-        await supabase
-          .from('profiles')
-          .update({
-            is_online: false,
-            last_seen: new Date().toISOString(),
-          })
-          .eq('id', authState.user.id);
-      }
-
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-
-      return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error('Error signing out:', error);
     }
   };
 
   return {
-    user: authState.user,
-    profile: authState.profile,
-    loading: authState.loading,
-    signInWithUsername,
+    user,
+    profile,
+    loading,
     signOut,
-    isAuthenticated: !!authState.user,
+    isAuthenticated: !!user
   };
 }
