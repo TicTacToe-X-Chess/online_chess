@@ -51,13 +51,21 @@ export default function HomePage() {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+<<<<<<< HEAD
             <Link href="/auth">
+=======
+            <Link href="/auth/register">
+>>>>>>> feature/login
               <Button size="lg" className="chess-gradient hover:opacity-90 transition-all hover-lift text-lg px-8 py-6">
                 <Play className="mr-2 h-5 w-5" />
                 Commencer à Jouer
               </Button>
             </Link>
+<<<<<<< HEAD
             <Link href="/leaderboard">
+=======
+            <Link href="/dashboard">
+>>>>>>> feature/login
               <Button size="lg" variant="outline" className="border-white/20 hover:bg-white/10 text-lg px-8 py-6">
                 <Crown className="mr-2 h-5 w-5" />
                 Voir le Classement
@@ -134,7 +142,11 @@ export default function HomePage() {
             <p className="text-slate-300 text-lg mb-8 max-w-2xl mx-auto">
               Rejoignez ChessMaster dès maintenant et commencez votre ascension vers le sommet du classement mondial.
             </p>
+<<<<<<< HEAD
             <Link href="/auth">
+=======
+            <Link href="/auth/register">
+>>>>>>> feature/login
               <Button size="lg" className="chess-gradient hover:opacity-90 transition-all hover-lift text-lg px-12 py-6">
                 <Play className="mr-2 h-5 w-5" />
                 Commencer Maintenant

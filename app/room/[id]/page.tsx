@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Header } from '@/components/header';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
+<<<<<<< HEAD
 import { Room, Profile } from '@/types/database';
 import { toast } from 'sonner';
 import { Chessboard } from 'react-chessboard';
@@ -59,10 +60,26 @@ export default function RoomPage() {
   const router = useRouter();
   const profile = isLocalTest ? hostProfile : useAuth().profile;
   const roomId = params.id as string;
+=======
+import { Room, UserProfile } from '@/types/database';
+import { toast } from 'sonner';
+import Link from 'next/link';
+
+interface RoomWithProfiles extends Room {
+  host: UserProfile;
+  guest?: UserProfile;
+}
+
+export default function RoomPage() {
+  const params = useParams();
+  const router = useRouter();
+  const { profile } = useAuth();
+>>>>>>> feature/login
   const [room, setRoom] = useState<RoomWithProfiles | null>(null);
   const [loading, setLoading] = useState(true);
   const [spectatorCount, setSpectatorCount] = useState(0);
 
+<<<<<<< HEAD
   // Initialisation de l'echiquier
   const {
     fen,
@@ -73,27 +90,42 @@ export default function RoomPage() {
     gameReason,
     turn
   } = useChessEngine();
+=======
+  const roomId = params.id as string;
+>>>>>>> feature/login
 
   useEffect(() => {
     if (!roomId) return;
 
+<<<<<<< HEAD
     // Récupération des infos à l'ouverture de la salle
     fetchRoom();
     
     /* --- Actualisation de la salle a chaque changements en temps réel --- */
+=======
+    fetchRoom();
+    
+    // Subscribe to room changes
+>>>>>>> feature/login
     const subscription = supabase
       .channel(`room-${roomId}`)
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
         () => {
+<<<<<<< HEAD
           // Actualisation de la salle
+=======
+>>>>>>> feature/login
           fetchRoom();
         }
       )
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'spectators', filter: `room_id=eq.${roomId}` },
         () => {
+<<<<<<< HEAD
           // Actualisation de la salle
+=======
+>>>>>>> feature/login
           fetchSpectators();
         }
       )
@@ -104,6 +136,7 @@ export default function RoomPage() {
     };
   }, [roomId]);
 
+<<<<<<< HEAD
   /* --- Récupération des informations de la salle --- */
   const fetchRoom = async () => {
     try {
@@ -148,6 +181,31 @@ export default function RoomPage() {
         setRoom(data as RoomWithProfiles);
         fetchSpectators();
       }
+=======
+  const fetchRoom = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('rooms')
+        .select(`
+          *,
+          host:user_public!rooms_host_id_fkey(*),
+          guest:user_public!rooms_guest_id_fkey(*)
+        `)
+        .eq('id', roomId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          toast.error('Cette salle n\'existe pas');
+          router.push('/dashboard');
+          return;
+        }
+        throw error;
+      }
+
+      setRoom(data as RoomWithProfiles);
+      fetchSpectators();
+>>>>>>> feature/login
     } catch (error) {
       console.error('Error fetching room:', error);
       toast.error('Erreur lors du chargement de la salle');
@@ -156,7 +214,10 @@ export default function RoomPage() {
     }
   };
 
+<<<<<<< HEAD
   /* --- Compteur du nombre de spectateurs --- */
+=======
+>>>>>>> feature/login
   const fetchSpectators = async () => {
     try {
       const { count, error } = await supabase
@@ -165,19 +226,27 @@ export default function RoomPage() {
         .eq('room_id', roomId);
 
       if (error) throw error;
+<<<<<<< HEAD
 
       setSpectatorCount(isLocalTest ? 3 : (count ?? 0));
 
+=======
+      setSpectatorCount(count || 0);
+>>>>>>> feature/login
     } catch (error) {
       console.error('Error fetching spectators:', error);
     }
   };
 
+<<<<<<< HEAD
   /* --- Fonction permettant de rejoindre la salle en tant que spectateur --- */
+=======
+>>>>>>> feature/login
   const joinAsSpectator = async () => {
     if (!profile || !room) return;
 
     try {
+<<<<<<< HEAD
       // En cas de test avec bdd seulement
       if (!isLocalTest) {
         const { error } = await supabase
@@ -198,13 +267,34 @@ export default function RoomPage() {
 
         toast.success('Vous regardez maintenant cette partie');
       }
+=======
+      const { error } = await supabase
+        .from('spectators')
+        .insert({
+          room_id: roomId,
+          user_id: profile.id,
+        });
+
+      if (error) {
+        if (error.code === '23505') {
+          toast.info('Vous êtes déjà spectateur de cette partie');
+          return;
+        }
+        throw error;
+      }
+
+      toast.success('Vous regardez maintenant cette partie');
+>>>>>>> feature/login
     } catch (error) {
       console.error('Error joining as spectator:', error);
       toast.error('Impossible de rejoindre en tant que spectateur');
     }
   };
 
+<<<<<<< HEAD
   /* --- Copie du code d’accès à la salle --- */
+=======
+>>>>>>> feature/login
   const copyRoomCode = () => {
     if (room?.room_code) {
       navigator.clipboard.writeText(room.room_code);
@@ -212,14 +302,20 @@ export default function RoomPage() {
     }
   };
 
+<<<<<<< HEAD
   /* --- Copie le lien complet de la salle --- */
+=======
+>>>>>>> feature/login
   const shareRoom = () => {
     const url = window.location.href;
     navigator.clipboard.writeText(url);
     toast.success('Lien de la salle copié !');
   };
 
+<<<<<<< HEAD
   /* --- Chargement de la salle --- */
+=======
+>>>>>>> feature/login
   if (loading) {
     return (
       <div className="min-h-screen">
@@ -234,7 +330,10 @@ export default function RoomPage() {
     );
   }
 
+<<<<<<< HEAD
   /* --- Salle introuvable --- */
+=======
+>>>>>>> feature/login
   if (!room) {
     return (
       <div className="min-h-screen">
@@ -254,13 +353,19 @@ export default function RoomPage() {
     );
   }
 
+<<<<<<< HEAD
   // Vérification des joueurs présents dans la salle
+=======
+>>>>>>> feature/login
   const isHost = profile?.id === room.host_id;
   const isGuest = profile?.id === room.guest_id;
   const isPlayer = isHost || isGuest;
   const canJoin = !room.guest_id && !isHost && room.status === 'waiting';
 
+<<<<<<< HEAD
   /* --- Contenu HTML --- */
+=======
+>>>>>>> feature/login
   return (
     <div className="min-h-screen">
       <Header />
@@ -325,6 +430,7 @@ export default function RoomPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<<<<<<< HEAD
           {/* Block du plateau de jeu + historique */}
           <div className="lg:col-span-2">
             {room.host_id && room.guest_id ? (
@@ -402,6 +508,35 @@ export default function RoomPage() {
           {/* Sidebar */}
           <div className="space-y-6">
             {/* Joueurs */}
+=======
+          {/* Game Board Area */}
+          <div className="lg:col-span-2">
+            <Card className="glass-effect border-white/10 h-96">
+              <CardContent className="p-6 flex items-center justify-center h-full">
+                <div className="text-center">
+                  <div className="w-16 h-16 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Users className="h-8 w-8 text-blue-400" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-white mb-2">
+                    Plateau d'Échecs
+                  </h3>
+                  <p className="text-slate-400 mb-4">
+                    Le plateau d'échecs sera affiché ici une fois la partie commencée
+                  </p>
+                  {room.status === 'waiting' && (
+                    <Badge variant="secondary" className="bg-yellow-600/20 text-yellow-400 border-yellow-400/50">
+                      En attente d'un adversaire...
+                    </Badge>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Players */}
+>>>>>>> feature/login
             <Card className="glass-effect border-white/10">
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2 text-white">
@@ -410,40 +545,72 @@ export default function RoomPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+<<<<<<< HEAD
                 {/* Hote */}
                 <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5">
                   <Avatar className="h-10 w-10">
                     <AvatarFallback className="bg-blue-600 text-white">
                       {room.host.username.charAt(0).toUpperCase()}
+=======
+                {/* Host */}
+                <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5">
+                  <Avatar className="h-10 w-10">
+                    <AvatarFallback className="bg-blue-600 text-white">
+                      {room.host.pseudo.charAt(0).toUpperCase()}
+>>>>>>> feature/login
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1">
                     <div className="flex items-center space-x-2">
+<<<<<<< HEAD
                       <span className="font-medium text-white">{room.host.username}</span>
                       {isHost && <Badge variant="secondary" className="text-xs">Vous</Badge>}
                     </div>
                     <div className="text-sm text-slate-400">
                       Hôte • {room.host.rating} ELO
+=======
+                      <span className="font-medium text-white">{room.host.pseudo}</span>
+                      {isHost && <Badge variant="secondary" className="text-xs">Vous</Badge>}
+                    </div>
+                    <div className="text-sm text-slate-400">
+                      Hôte
+>>>>>>> feature/login
                     </div>
                   </div>
                   <div className="w-3 h-3 bg-white rounded-full"></div>
                 </div>
 
+<<<<<<< HEAD
                 {/* Invité */}
+=======
+                {/* Guest */}
+>>>>>>> feature/login
                 {room.guest ? (
                   <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5">
                     <Avatar className="h-10 w-10">
                       <AvatarFallback className="bg-slate-600 text-white">
+<<<<<<< HEAD
                         {room.guest.username.charAt(0).toUpperCase()}
+=======
+                        {room.guest.pseudo.charAt(0).toUpperCase()}
+>>>>>>> feature/login
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1">
                       <div className="flex items-center space-x-2">
+<<<<<<< HEAD
                         <span className="font-medium text-white">{room.guest.username}</span>
                         {isGuest && <Badge variant="secondary" className="text-xs">Vous</Badge>}
                       </div>
                       <div className="text-sm text-slate-400">
                         Invité • {room.guest.rating} ELO
+=======
+                        <span className="font-medium text-white">{room.guest.pseudo}</span>
+                        {isGuest && <Badge variant="secondary" className="text-xs">Vous</Badge>}
+                      </div>
+                      <div className="text-sm text-slate-400">
+                        Invité
+>>>>>>> feature/login
                       </div>
                     </div>
                     <div className="w-3 h-3 bg-black rounded-full"></div>
