@@ -83,7 +83,7 @@ export function useAuth() {
           setTimeout(() => {
             router.push('/dashboard');
             router.refresh(); // Force le refresh de la page
-          }, 1000);
+          }, 180000); // Délais de 3 minutes
         }
 
         if (event === 'SIGNED_OUT') {
