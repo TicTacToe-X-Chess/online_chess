@@ -10,7 +10,6 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Header } from '@/components/header';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase/client';
-import { Room, UserProfile } from '@/types/database';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
