@@ -74,8 +74,14 @@ export function Header() {
                     </span>
                   </div>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/profile" className="flex items-center space-x-2 cursor-pointer">
+                    <User className="h-4 w-4" />
+                    <span>Mon Profil</span>
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut} className="text-red-400 focus:text-red-400">
+                <DropdownMenuItem onClick={handleSignOut} className="flex items-center space-x-2 cursor-pointer">
                   <LogOut className="h-4 w-4 mr-2" />
                   Déconnexion
                 </DropdownMenuItem>
