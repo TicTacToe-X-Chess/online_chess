@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Users, Eye, Clock, Copy, Share2 } from 'lucide-react';
+import { ArrowLeft, Users, Eye, Clock, Copy, Share2, Crown, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Header } from '@/components/header';
@@ -12,55 +12,107 @@ import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase/client';
 import { Room, UserProfile } from '@/types/database';
 import { toast } from 'sonner';
-import { Chessboard } from 'react-chessboard';
-import { useChessEngine } from '@/hooks/useChessEngine';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
+import { Chess } from 'chess.js';
 
-interface RoomWithProfiles extends Room {
-  host: UserProfile;
-  guest?: UserProfile;
+// Import dynamique pour éviter les erreurs SSR
+const Chessboard = dynamic(() => import('react-chessboard').then(mod => mod.Chessboard), {
+  ssr: false,
+  loading: () => (
+    <div className="aspect-square bg-gradient-to-br from-amber-100 to-amber-200 rounded-lg flex items-center justify-center">
+      <div className="text-slate-800 text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-600 mx-auto mb-2"></div>
+        <div>Chargement de l'échiquier...</div>
+      </div>
+    </div>
+  )
+});
+
+interface UserProfile {
+  id: string;
+  pseudo: string;
+  email: string;
+  created_at: string;
+  last_connection: string;
+  country?: string;
 }
 
-// Vérification si en développement ou non --> Pour les test
-// const isLocalTest = process.env.NODE_ENV === 'development';
-const isLocalTest = false;
+interface SimpleUserData {
+  id: string;
+  pseudo: string;
+  email: string;
+}
 
+interface RoomParticipant {
+  id: string;
+  role: 'host' | 'player' | 'spectator';
+  joined_at: string;
+  user: UserProfile;
+}
+
+interface RoomData {
+  id: string;
+  name: string;
+  host_id: string;
+  guest_id?: string;
+  time_control: string;
+  is_private: boolean;
+  room_code?: string;
+  status: string;
+  max_spectators: number;
+  created_at: string;
+  updated_at: string;
+  host?: SimpleUserData;
+  guest?: SimpleUserData;
+}
 
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
   const roomId = params.id as string;
-  const [room, setRoom] = useState<RoomWithProfiles | null>(null);
+  const [room, setRoom] = useState<RoomData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [spectatorCount, setSpectatorCount] = useState(0);
+  const [participants, setParticipants] = useState<RoomParticipant[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [joiningRoom, setJoiningRoom] = useState(false);
+  
+  // État du jeu d'échecs
+  const [game, setGame] = useState(new Chess());
+  const [gameHistory, setGameHistory] = useState<string[]>([]);
+  const [currentPlayer, setCurrentPlayer] = useState<'white' | 'black'>('white');
+  const [gameStarted, setGameStarted] = useState(false);
+  
   const supabase = createClient();
 
-  // Initialisation de l'echiquier
-  const {
-    fen,
-    makeMove,
-    resetGame,
-    history,
-    isGameOver,
-    gameReason,
-    turn
-  } = useChessEngine();
+  console.log('🏠 Room Page - Room ID from params:', roomId);
+  console.log('📊 Current user:', user?.id);
 
   // Récupérer le profil utilisateur
   useEffect(() => {
     async function getUserProfile() {
       if (!user) return;
       
-      const { data, error } = await supabase
-        .from('user_public')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      
-      if (!error && data) {
-        setUserProfile(data);
+      try {
+        console.log('👤 Fetching user profile...');
+        const { data, error } = await supabase
+          .from('user_public')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+        
+        if (error) {
+          console.error('❌ Error fetching user profile:', error);
+          return;
+        }
+        
+        if (data) {
+          console.log('✅ User profile loaded:', data);
+          setUserProfile(data);
+        }
+      } catch (error) {
+        console.error('💥 Exception in getUserProfile:', error);
       }
     }
 
@@ -68,26 +120,32 @@ export default function RoomPage() {
   }, [user, supabase]);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId) {
+      console.error('❌ No room ID provided');
+      return;
+    }
+
+    console.log('🔍 Starting to fetch room data for ID:', roomId);
 
     // Récupération des infos à l'ouverture de la salle
     fetchRoom();
+    fetchParticipants();
     
-    /* --- Actualisation de la salle a chaque changements en temps réel --- */
+    // Actualisation en temps réel
     const subscription = supabase
       .channel(`room-${roomId}`)
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
         () => {
-          // Actualisation de la salle
+          console.log('🔔 Room change detected');
           fetchRoom();
         }
       )
       .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'spectators', filter: `room_id=eq.${roomId}` },
+        { event: '*', schema: 'public', table: 'room_participants', filter: `room_id=eq.${roomId}` },
         () => {
-          // Actualisation de la salle
-          fetchSpectators();
+          console.log('🔔 Participant change detected');
+          fetchParticipants();
         }
       )
       .subscribe();
@@ -95,23 +153,49 @@ export default function RoomPage() {
     return () => {
       subscription.unsubscribe();
     };
-  }, [roomId]);
+  }, [roomId, supabase]);
 
-  /* --- Récupération des informations de la salle --- */
+  // Initialiser le jeu quand les deux joueurs sont présents
+  useEffect(() => {
+    if (room && room.host_id && room.guest_id && room.status === 'playing' && !gameStarted) {
+      console.log('🎮 Initializing chess game...');
+      setGameStarted(true);
+      setGame(new Chess());
+      setGameHistory([]);
+      setCurrentPlayer('white');
+    }
+  }, [room, gameStarted]);
+
+  // Récupération des informations de la salle
   const fetchRoom = async () => {
     try {
+      console.log('🏠 Fetching room details...');
+      
       const { data, error } = await supabase
         .from('rooms')
         .select(`
-          *,
-          host:user_public!rooms_host_id_fkey(*),
-          guest:user_public!rooms_guest_id_fkey(*)
+          id,
+          name,
+          host_id,
+          guest_id,
+          time_control,
+          is_private,
+          room_code,
+          status,
+          max_spectators,
+          created_at,
+          updated_at,
+          host:user_public!rooms_host_id_fkey(id, pseudo, email),
+          guest:user_public!rooms_guest_id_fkey(id, pseudo, email)
         `)
         .eq('id', roomId)
         .single();
 
+      console.log('📋 Room fetch response:', { data, error });
+
       if (error) {
         if (error.code === 'PGRST116') {
+          console.error('❌ Room not found');
           toast.error('Cette salle n\'existe pas');
           router.push('/dashboard');
           return;
@@ -119,83 +203,262 @@ export default function RoomPage() {
         throw error;
       }
 
-      setRoom(data as RoomWithProfiles);
-      fetchSpectators();
+      if (!data) {
+        console.error('❌ No room data returned');
+        toast.error('Salle introuvable');
+        router.push('/dashboard');
+        return;
+      }
+
+      // Transformer les données pour gérer les tableaux Supabase
+      const roomData: RoomData = {
+        id: data.id,
+        name: data.name,
+        host_id: data.host_id,
+        guest_id: data.guest_id,
+        time_control: data.time_control,
+        is_private: data.is_private,
+        room_code: data.room_code,
+        status: data.status,
+        max_spectators: data.max_spectators,
+        created_at: data.created_at,
+        updated_at: data.updated_at,
+        host: Array.isArray(data.host) ? data.host[0] : data.host,
+        guest: data.guest ? (Array.isArray(data.guest) ? data.guest[0] : data.guest) : undefined
+      };
+
+      console.log('✅ Room data processed:', roomData);
+      setRoom(roomData);
     } catch (error) {
-      console.error('Error fetching room:', error);
+      console.error('💥 Error fetching room:', error);
       toast.error('Erreur lors du chargement de la salle');
+      router.push('/dashboard');
     } finally {
       setLoading(false);
     }
   };
 
-  /* --- Compteur du nombre de spectateurs --- */
-  const fetchSpectators = async () => {
+  // Récupération des participants
+  const fetchParticipants = async () => {
     try {
-      const { count, error } = await supabase
-        .from('spectators')
-        .select('*', { count: 'exact', head: true })
+      console.log('👥 Fetching participants...');
+      
+      const { data, error } = await supabase
+        .from('room_participants')
+        .select(`
+          id,
+          role,
+          joined_at,
+          user:user_public!room_participants_user_id_fkey(*)
+        `)
         .eq('room_id', roomId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error fetching participants:', error);
+        return;
+      }
 
-      setSpectatorCount(count || 0);
+      // Transformer les données
+      const participantsData = (data || []).map(p => ({
+        ...p,
+        user: Array.isArray(p.user) ? p.user[0] : p.user
+      })) as RoomParticipant[];
+
+      console.log('👥 Participants loaded:', participantsData);
+      setParticipants(participantsData);
     } catch (error) {
-      console.error('Error fetching spectators:', error);
+      console.error('💥 Error fetching participants:', error);
     }
   };
 
-  /* --- Fonction permettant de rejoindre la salle en tant que spectateur --- */
-  const joinAsSpectator = async () => {
-    if (!userProfile || !room) return;
+  // Fonction pour jouer un coup
+  const makeMove = (sourceSquare: string, targetSquare: string) => {
+    console.log('🎯 Attempting move:', sourceSquare, '->', targetSquare);
+    
+    if (!gameStarted) {
+      console.log('❌ Game not started yet');
+      return false;
+    }
+
+    // Vérifier si c'est le tour du joueur
+    const isPlayerTurn = 
+      (game.turn() === 'w' && isHost) || 
+      (game.turn() === 'b' && isGuest);
+    
+    if (!isPlayerTurn) {
+      console.log('❌ Not player turn');
+      toast.error('Ce n\'est pas votre tour !');
+      return false;
+    }
 
     try {
+      const gameCopy = new Chess(game.fen());
+      const move = gameCopy.move({
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: 'q' // Toujours promouvoir en dame pour simplifier
+      });
+
+      if (move === null) {
+        console.log('❌ Invalid move');
+        toast.error('Mouvement invalide !');
+        return false;
+      }
+
+      console.log('✅ Valid move:', move);
+      
+      // Mettre à jour l'état du jeu
+      setGame(gameCopy);
+      setGameHistory(prev => [...prev, move.san]);
+      setCurrentPlayer(gameCopy.turn() === 'w' ? 'white' : 'black');
+
+      // Vérifier la fin de partie
+      if (gameCopy.isGameOver()) {
+        console.log('🏁 Game over!');
+        if (gameCopy.isCheckmate()) {
+          const winner = gameCopy.turn() === 'w' ? 'Noirs' : 'Blancs';
+          toast.success(`Échec et mat ! Victoire des ${winner} !`);
+        } else if (gameCopy.isDraw()) {
+          toast.info('Match nul !');
+        }
+      } else if (gameCopy.isCheck()) {
+        toast.warning('Échec !');
+      }
+
+      // TODO: Synchroniser avec la base de données
+      // saveGameState(gameCopy.fen(), move.san);
+
+      return true;
+    } catch (error) {
+      console.error('💥 Error making move:', error);
+      toast.error('Erreur lors du mouvement');
+      return false;
+    }
+  };
+
+  // Rejoindre en tant que spectateur
+  const joinAsSpectator = async () => {
+    if (!userProfile || !room || joiningRoom) return;
+
+    setJoiningRoom(true);
+
+    try {
+      console.log('👀 Joining as spectator...');
+      
+      // Vérifier les limites
+      const spectators = participants.filter(p => p.role === 'spectator');
+      if (spectators.length >= room.max_spectators) {
+        toast.error(`Cette salle a atteint sa limite de ${room.max_spectators} spectateurs`);
+        return;
+      }
+
       const { error } = await supabase
-        .from('spectators')
+        .from('room_participants')
         .insert({
           room_id: roomId,
           user_id: userProfile.id,
+          role: 'spectator'
         });
 
-      // 23505 = Conflit unique --> Utilisateur déja spectateur
       if (error) {
         if (error.code === '23505') {
-          toast.info('Vous êtes déjà spectateur de cette partie');
+          toast.info('Vous regardez déjà cette partie');
           return;
         }
         throw error;
       }
 
       toast.success('Vous regardez maintenant cette partie');
+      fetchParticipants();
     } catch (error) {
-      console.error('Error joining as spectator:', error);
+      console.error('💥 Error joining as spectator:', error);
       toast.error('Impossible de rejoindre en tant que spectateur');
+    } finally {
+      setJoiningRoom(false);
     }
   };
 
-  /* -- Fonction pour rejoindre en tant que joueur --- */
+  // Rejoindre en tant que joueur
   const joinAsPlayer = async () => {
-    if (!userProfile || !room || room.guest_id) return;
+    if (!userProfile || !room || room.guest_id || joiningRoom) return;
+
+    setJoiningRoom(true);
 
     try {
-      const { error } = await supabase
+      console.log('🎮 Joining as player...');
+      
+      // Ajouter comme participant
+      const { error: participantError } = await supabase
+        .from('room_participants')
+        .insert({
+          room_id: roomId,
+          user_id: userProfile.id,
+          role: 'player'
+        });
+
+      if (participantError) {
+        if (participantError.code === '23505') {
+          toast.info('Vous participez déjà à cette partie');
+          return;
+        }
+        throw participantError;
+      }
+
+      // Mettre à jour la room
+      const { error: roomError } = await supabase
         .from('rooms')
         .update({ 
           guest_id: userProfile.id,
-          status: 'playing'
+          status: 'playing',
+          updated_at: new Date().toISOString()
         })
-        .eq('id', roomId);
+        .eq('id', roomId)
+        .eq('status', 'waiting')
+        .is('guest_id', null);
 
-      if (error) throw error;
+      if (roomError) {
+        // Rollback
+        await supabase
+          .from('room_participants')
+          .delete()
+          .eq('room_id', roomId)
+          .eq('user_id', userProfile.id);
+        throw roomError;
+      }
 
       toast.success('Vous avez rejoint la partie !');
+      fetchRoom();
+      fetchParticipants();
     } catch (error) {
-      console.error('Error joining as player:', error);
+      console.error('💥 Error joining as player:', error);
       toast.error('Impossible de rejoindre la partie');
+    } finally {
+      setJoiningRoom(false);
     }
   };
 
-  /* --- Copie du code d’accès à la salle --- */
+  // Quitter la salle
+  const leaveRoom = async () => {
+    if (!userProfile) return;
+
+    try {
+      const { error } = await supabase
+        .from('room_participants')
+        .delete()
+        .eq('room_id', roomId)
+        .eq('user_id', userProfile.id);
+
+      if (error) throw error;
+
+      toast.success('Vous avez quitté la salle');
+      router.push('/dashboard');
+    } catch (error) {
+      console.error('💥 Error leaving room:', error);
+      toast.error('Erreur lors de la sortie de la salle');
+    }
+  };
+
+  // Copie du code d'accès à la salle
   const copyRoomCode = () => {
     if (room?.room_code) {
       navigator.clipboard.writeText(room.room_code);
@@ -203,14 +466,23 @@ export default function RoomPage() {
     }
   };
 
-  /* --- Copie du lien complet de la salle --- */
+  // Copie du lien complet de la salle
   const shareRoom = () => {
     const url = window.location.href;
     navigator.clipboard.writeText(url);
     toast.success('Lien de la salle copié !');
   };
 
-  /* --- Chargement de la salle --- */
+  // États et vérifications
+  const spectators = participants.filter(p => p.role === 'spectator');
+  const userParticipant = participants.find(p => p.user.id === userProfile?.id);
+  const isHost = userProfile?.id === room?.host_id;
+  const isGuest = userProfile?.id === room?.guest_id;
+  const isPlayer = isHost || isGuest;
+  const isSpectator = userParticipant?.role === 'spectator';
+  const canJoin = !room?.guest_id && !isHost && room?.status === 'waiting' && userProfile && !userParticipant;
+  const canSpectate = userProfile && !userParticipant && spectators.length < (room?.max_spectators || 10);
+
   if (loading) {
     return (
       <div className="min-h-screen">
@@ -219,13 +491,13 @@ export default function RoomPage() {
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400 mx-auto mb-4"></div>
             <p className="text-slate-400">Chargement de la salle...</p>
+            <p className="text-slate-500 text-sm mt-2">Room ID: {roomId}</p>
           </div>
         </div>
       </div>
     );
   }
 
-  /* --- Salle introuvable --- */
   if (!room) {
     return (
       <div className="min-h-screen">
@@ -233,7 +505,8 @@ export default function RoomPage() {
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
             <h2 className="text-2xl font-bold text-white mb-4">Salle introuvable</h2>
-            <p className="text-slate-400 mb-6">Cette salle n'existe pas ou a été supprimée.</p>
+            <p className="text-slate-400 mb-2">Cette salle n'existe pas ou a été supprimée.</p>
+            <p className="text-slate-500 text-sm mb-6">Room ID recherché: {roomId}</p>
             <Link href="/dashboard">
               <Button className="chess-gradient">
                 Retour au Dashboard
@@ -245,32 +518,24 @@ export default function RoomPage() {
     );
   }
 
-  // Vérification des joueurs présents dans la salle
-  const isHost = userProfile?.id === room.host_id;
-  const isGuest = userProfile?.id === room.guest_id;
-  const isPlayer = isHost || isGuest;
-  const canJoin = !room.guest_id && !isHost && room.status === 'waiting' && userProfile;
-
-
-  /* --- Contenu HTML --- */
   return (
     <div className="min-h-screen">
       <Header />
       
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
         <div className="mb-6">
           <Link href="/dashboard" className="inline-flex items-center text-slate-400 hover:text-blue-400 transition-colors mb-4">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Retour au Dashboard
           </Link>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-white mb-2">
                 {room.name}
               </h1>
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-4 flex-wrap gap-2">
                 <Badge 
-                  variant={room.status === 'waiting' ? 'secondary' : room.status === 'playing' ? 'default' : 'outline'}
+                  variant="outline"
                   className={
                     room.status === 'waiting' ? 'bg-yellow-600/20 text-yellow-400 border-yellow-400/50' :
                     room.status === 'playing' ? 'bg-green-600/20 text-green-400 border-green-400/50' :
@@ -287,6 +552,15 @@ export default function RoomPage() {
                 {room.is_private && (
                   <Badge variant="outline" className="border-purple-400/50 text-purple-400">
                     Privée
+                  </Badge>
+                )}
+                <Badge variant="outline" className="border-slate-400/50 text-slate-400">
+                  <Eye className="h-3 w-3 mr-1" />
+                  {spectators.length} spectateur{spectators.length > 1 ? 's' : ''}
+                </Badge>
+                {gameStarted && (
+                  <Badge variant="outline" className="border-green-400/50 text-green-400">
+                    🎮 Jeu démarré
                   </Badge>
                 )}
               </div>
@@ -316,36 +590,84 @@ export default function RoomPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Block du plateau de jeu + historique */}
-          <div className="lg:col-span-2">
-            {room.host_id && room.guest_id ? (
-              <>
-              <div>
-                <Chessboard
-                  position={fen}
-                  onPieceDrop={(sourceSquare, targetSquare) => {
-                    const move = makeMove({ from: sourceSquare, to: targetSquare, promotion: 'q' });
-                    return move !== null;
-                  } } />
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+          {/* Plateau de jeu + historique */}
+          <div className="xl:col-span-3">
+            {gameStarted && room.host_id && room.guest_id && room.status === 'playing' ? (
+              <div className="space-y-4">
+                {/* Échiquier */}
+                <Card className="glass-effect border-white/10">
+                  <CardContent className="p-6">
+                    <div className="mb-4 flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-white font-medium">Tour des:</span>
+                        <Badge variant="outline" className={
+                          currentPlayer === 'white' 
+                            ? 'border-white text-white bg-white/10' 
+                            : 'border-slate-800 text-slate-800 bg-slate-800/10'
+                        }>
+                          {currentPlayer === 'white' ? '⚪ Blancs' : '⚫ Noirs'}
+                        </Badge>
+                        {isPlayer && (
+                          <span className="text-sm text-slate-400">
+                            {((currentPlayer === 'white' && isHost) || (currentPlayer === 'black' && isGuest)) 
+                              ? '(Votre tour)' 
+                              : '(Tour de l\'adversaire)'}
+                          </span>
+                        )}
+                      </div>
+                      {game.isCheck() && (
+                        <Badge variant="outline" className="border-red-400 text-red-400 bg-red-400/10">
+                          ⚠️ Échec !
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    <div className="aspect-square max-w-2xl mx-auto">
+                      <Chessboard
+                        position={game.fen()}
+                        onPieceDrop={makeMove}
+                        boardOrientation={isHost ? 'white' : 'black'}
+                        arePiecesDraggable={isPlayer && gameStarted}
+                        customBoardStyle={{
+                          borderRadius: '8px',
+                          boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)'
+                        }}
+                        customDarkSquareStyle={{ backgroundColor: '#779952' }}
+                        customLightSquareStyle={{ backgroundColor: '#edeed1' }}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Historique des coups */}
+                <Card className="glass-effect border-white/10">
+                  <CardHeader>
+                    <CardTitle className="text-white flex items-center justify-between">
+                      <span>Historique des Coups</span>
+                      <Badge variant="outline" className="border-blue-400/50 text-blue-400">
+                        {gameHistory.length} coup{gameHistory.length > 1 ? 's' : ''}
+                      </Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {gameHistory.length === 0 ? (
+                      <p className="text-slate-400">Aucun coup joué pour l'instant.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2 text-sm max-h-48 overflow-y-auto">
+                        {gameHistory.map((move, index) => (
+                          <div key={index} className="flex items-center space-x-2 p-2 rounded bg-white/5">
+                            <span className="text-slate-400 text-xs">
+                              {Math.floor(index / 2) + 1}{index % 2 === 0 ? '.' : '...'}
+                            </span>
+                            <span className="text-white font-mono">{move}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
-              <Card className="glass-effect border-white/10 mt-4">
-                <CardHeader>
-                  <CardTitle className="text-white">Historique des Coups</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {history.length === 0 ? (
-                    <p className="text-slate-400">Aucun coup joué pour l’instant.</p>
-                  ) : (
-                    <ol className="text-white space-y-1 text-sm list-decimal list-inside">
-                      {history.map((move, index) => (
-                        <li key={index}>{move}</li>
-                      ))}
-                    </ol>
-                  )}
-                </CardContent>
-              </Card>
-              </>
             ) : (
               <Card className="glass-effect border-white/10 h-96">
                 <CardContent className="p-6 flex items-center justify-center h-full">
@@ -357,7 +679,9 @@ export default function RoomPage() {
                       Plateau d'Échecs
                     </h3>
                     <p className="text-slate-400 mb-4">
-                      Le plateau d'échecs sera affiché ici une fois la partie commencée
+                      {room.status === 'waiting' 
+                        ? 'En attente d\'un adversaire pour commencer la partie'
+                        : 'La partie va commencer...'}
                     </p>
                     {room.status === 'waiting' && (
                       <Badge variant="secondary" className="bg-yellow-600/20 text-yellow-400 border-yellow-400/50">
@@ -370,27 +694,6 @@ export default function RoomPage() {
             )}
           </div>
 
-          { /* Modale de fin de partie */ }
-          {isGameOver && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-              <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-2xl w-[90%] max-w-md text-center">
-                <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-white">
-                  Partie terminée
-                </h2>
-                <p className="text-gray-600 dark:text-gray-300 mb-6">
-                  {turn === 'w' ? 'Victoire des noirs' : 'Victoire des blancs'}
-                </p>
-                <p>{gameReason}</p>
-                <button
-                  onClick={resetGame}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition"
-                >
-                  Rejouer
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Sidebar */}
           <div className="space-y-6">
             {/* Joueurs */}
@@ -402,42 +705,55 @@ export default function RoomPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Hote */}
+                {/* Hôte */}
                 <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5">
                   <Avatar className="h-10 w-10">
                     <AvatarFallback className="bg-blue-600 text-white">
-                      {room.host.pseudo.charAt(0).toUpperCase()}
+                      {room.host?.pseudo?.charAt(0).toUpperCase() || 'H'}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1">
                     <div className="flex items-center space-x-2">
-                      <span className="font-medium text-white">{room.host.pseudo}</span>
+                      <span className="font-medium text-white">{room.host?.pseudo || 'Hôte'}</span>
                       {isHost && <Badge variant="secondary" className="text-xs">Vous</Badge>}
+                      <Crown className="h-3 w-3 text-yellow-400" />
                     </div>
-                    <div className="text-sm text-slate-400">
-                      Hôte
+                    <div className="text-sm text-slate-400 flex items-center space-x-2">
+                      <span>Hôte • Blancs</span>
+                      {gameStarted && currentPlayer === 'white' && (
+                        <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
+                          Son tour
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="w-3 h-3 bg-white rounded-full"></div>
                 </div>
+
                 {/* Invité */}
                 {room.guest ? (
                   <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5">
                     <Avatar className="h-10 w-10">
                       <AvatarFallback className="bg-slate-600 text-white">
-                        {room.guest.pseudo.charAt(0).toUpperCase()}
+                        {room.guest?.pseudo?.charAt(0).toUpperCase() || 'I'}
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1">
                       <div className="flex items-center space-x-2">
-                        <span className="font-medium text-white">{room.guest.pseudo}</span>
+                        <span className="font-medium text-white">{room.guest?.pseudo || 'Invité'}</span>
                         {isGuest && <Badge variant="secondary" className="text-xs">Vous</Badge>}
+                        <Play className="h-3 w-3 text-blue-400" />
                       </div>
-                      <div className="text-sm text-slate-400">
-                        Invité
+                      <div className="text-sm text-slate-400 flex items-center space-x-2">
+                        <span>Invité • Noirs</span>
+                        {gameStarted && currentPlayer === 'black' && (
+                          <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
+                            Son tour
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="w-3 h-3 bg-black rounded-full"></div>
+                    <div className="w-3 h-3 bg-slate-800 rounded-full border border-white"></div>
                   </div>
                 ) : (
                   <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5 border-2 border-dashed border-white/20">
@@ -462,20 +778,50 @@ export default function RoomPage() {
                   <Button 
                     className="w-full chess-gradient hover:opacity-90"
                     onClick={joinAsPlayer}
+                    disabled={joiningRoom}
                   >
-                    <Users className="mr-2 h-4 w-4" />
-                    Rejoindre la Partie
+                    {joiningRoom ? (
+                      <div className="flex items-center">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b border-white mr-2"></div>
+                        Rejoindre...
+                      </div>
+                    ) : (
+                      <>
+                        <Users className="mr-2 h-4 w-4" />
+                        Rejoindre la Partie
+                      </>
+                    )}
                   </Button>
                 )}
                 
-                {!isPlayer && userProfile && (
+                {canSpectate && (
                   <Button
                     variant="outline"
                     className="w-full border-white/20 hover:bg-white/10"
                     onClick={joinAsSpectator}
+                    disabled={joiningRoom}
                   >
-                    <Eye className="mr-2 h-4 w-4" />
-                    Regarder ({spectatorCount})
+                    {joiningRoom ? (
+                      <div className="flex items-center">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b border-white mr-2"></div>
+                        Regarder...
+                      </div>
+                    ) : (
+                      <>
+                        <Eye className="mr-2 h-4 w-4" />
+                        Regarder ({spectators.length})
+                      </>
+                    )}
+                  </Button>
+                )}
+
+                {userParticipant && !isHost && (
+                  <Button
+                    variant="outline"
+                    className="w-full border-red-400/50 text-red-400 hover:bg-red-400/10"
+                    onClick={leaveRoom}
+                  >
+                    Quitter la Salle
                   </Button>
                 )}
 
@@ -491,16 +837,37 @@ export default function RoomPage() {
                     </Link>
                   </div>
                 )}
-
-                {room.status === 'waiting' && !canJoin && !isPlayer && userProfile && (
-                  <div className="text-center py-4">
-                    <p className="text-sm text-slate-400">
-                      Cette partie est complète ou vous ne pouvez pas la rejoindre
-                    </p>
-                  </div>
-                )}
               </CardContent>
             </Card>
+
+            {/* Spectateurs */}
+            {spectators.length > 0 && (
+              <Card className="glass-effect border-white/10">
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2 text-white">
+                    <Eye className="h-5 w-5 text-purple-400" />
+                    <span>Spectateurs ({spectators.length})</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-32 overflow-y-auto">
+                    {spectators.map((spectator) => (
+                      <div key={spectator.id} className="flex items-center space-x-2 text-sm">
+                        <Avatar className="h-6 w-6">
+                          <AvatarFallback className="bg-purple-600 text-white text-xs">
+                            {spectator.user.pseudo.charAt(0).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-white">{spectator.user.pseudo}</span>
+                        {spectator.user.id === userProfile?.id && (
+                          <Badge variant="secondary" className="text-xs">Vous</Badge>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Room Info */}
             <Card className="glass-effect border-white/10">
@@ -515,13 +882,27 @@ export default function RoomPage() {
                   </span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-slate-400">Contrôle temps:</span>
+                  <span className="text-white">{room.time_control}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-slate-400">Spectateurs max:</span>
                   <span className="text-white">{room.max_spectators}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Spectateurs actuels:</span>
-                  <span className="text-white">{spectatorCount}</span>
+                  <span className="text-slate-400">Participants:</span>
+                  <span className="text-white">{participants.length}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Statut:</span>
+                  <span className="text-white capitalize">{room.status}</span>
+                </div>
+                {gameStarted && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Coups joués:</span>
+                    <span className="text-white">{gameHistory.length}</span>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
