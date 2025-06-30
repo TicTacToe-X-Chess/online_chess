@@ -8,27 +8,38 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Header } from '@/components/header';
 import { useAuth } from '@/hooks/useAuth';
-<<<<<<< HEAD
-import { supabase } from '@/lib/supabase';
-=======
 import { useUserRanking } from '@/hooks/useUserRanking';
 import { createClient } from '@/lib/supabase/client';
->>>>>>> feature/login
 import { Room } from '@/types/database';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
 export default function DashboardPage() {
-  const { profile, loading } = useAuth();
-<<<<<<< HEAD
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [loadingRooms, setLoadingRooms] = useState(true);
-=======
-  const { ranking, loading: rankingLoading, error: rankingError, getWinRate } = useUserRanking(profile?.id || null);
+  const { user, loading } = useAuth();
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const { ranking, loading: rankingLoading, error: rankingError, getWinRate } = useUserRanking(user?.id || null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(true);
   const supabase = createClient();
->>>>>>> feature/login
+
+  // Récupérer le profil utilisateur
+  useEffect(() => {
+    async function getUserProfile() {
+      if (!user) return;
+      
+      const { data, error } = await supabase
+        .from('user_public')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      
+      if (!error && data) {
+        setUserProfile(data);
+      }
+    }
+
+    getUserProfile();
+  }, [user, supabase]);
 
   useEffect(() => {
     fetchRooms();
@@ -55,13 +66,8 @@ export default function DashboardPage() {
         .from('rooms')
         .select(`
           *,
-<<<<<<< HEAD
-          profiles!rooms_host_id_fkey(username),
-          guest:profiles!rooms_guest_id_fkey(username)
-=======
           host:user_public!rooms_host_id_fkey(pseudo),
           guest:user_public!rooms_guest_id_fkey(pseudo)
->>>>>>> feature/login
         `)
         .eq('status', 'waiting')
         .eq('is_private', false)
@@ -79,13 +85,13 @@ export default function DashboardPage() {
   };
 
   const joinRoom = async (roomId: string) => {
-    if (!profile) return;
+    if (!userProfile) return;
 
     try {
       const { error } = await supabase
         .from('rooms')
         .update({ 
-          guest_id: profile.id,
+          guest_id: userProfile.id,
           status: 'playing',
           updated_at: new Date().toISOString()
         })
@@ -97,7 +103,7 @@ export default function DashboardPage() {
 
       toast.success('Vous avez rejoint la partie !');
       // Redirect to room
-      window.location.href = `/room/${roomId}`;
+      window.location.href = `/rooms/${roomId}`;
     } catch (error) {
       console.error('Error joining room:', error);
       toast.error('Impossible de rejoindre cette salle');
@@ -118,6 +124,25 @@ export default function DashboardPage() {
     );
   }
 
+  if (!user) {
+    return (
+      <div className="min-h-screen">
+        <Header />
+        <div className="flex items-center justify-center py-20">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-white mb-4">Accès restreint</h2>
+            <p className="text-slate-400 mb-6">Vous devez être connecté pour accéder au dashboard.</p>
+            <Link href="/auth/login">
+              <Button className="chess-gradient">
+                Se connecter
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen">
       <Header />
@@ -126,11 +151,7 @@ export default function DashboardPage() {
         {/* Welcome Section */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-white mb-2">
-<<<<<<< HEAD
-            Bienvenue, {profile?.username} !
-=======
-            Bienvenue, {profile?.pseudo} !
->>>>>>> feature/login
+            Bienvenue, {userProfile?.pseudo || user.email} !
           </h1>
           <p className="text-slate-400">
             Prêt pour une nouvelle partie d'échecs ?
@@ -142,10 +163,6 @@ export default function DashboardPage() {
           <Card className="glass-effect border-white/10">
             <CardContent className="p-6 text-center">
               <Trophy className="h-8 w-8 text-yellow-400 mx-auto mb-2" />
-<<<<<<< HEAD
-              <div className="text-2xl font-bold text-white">{profile?.rating}</div>
-              <div className="text-sm text-slate-400">ELO Rating</div>
-=======
               <div className="text-2xl font-bold text-white">
                 {rankingLoading ? (
                   <div className="animate-pulse bg-slate-600 h-8 w-16 mx-auto rounded"></div>
@@ -157,16 +174,12 @@ export default function DashboardPage() {
               {rankingError && (
                 <div className="text-xs text-red-400 mt-1">Erreur de chargement</div>
               )}
->>>>>>> feature/login
             </CardContent>
           </Card>
           
           <Card className="glass-effect border-white/10">
             <CardContent className="p-6 text-center">
               <Play className="h-8 w-8 text-blue-400 mx-auto mb-2" />
-<<<<<<< HEAD
-              <div className="text-2xl font-bold text-white">{profile?.games_played}</div>
-=======
               <div className="text-2xl font-bold text-white">
                 {rankingLoading ? (
                   <div className="animate-pulse bg-slate-600 h-8 w-16 mx-auto rounded"></div>
@@ -174,7 +187,6 @@ export default function DashboardPage() {
                   ranking?.games_played || 0
                 )}
               </div>
->>>>>>> feature/login
               <div className="text-sm text-slate-400">Parties Jouées</div>
             </CardContent>
           </Card>
@@ -182,9 +194,6 @@ export default function DashboardPage() {
           <Card className="glass-effect border-white/10">
             <CardContent className="p-6 text-center">
               <Trophy className="h-8 w-8 text-green-400 mx-auto mb-2" />
-<<<<<<< HEAD
-              <div className="text-2xl font-bold text-white">{profile?.games_won}</div>
-=======
               <div className="text-2xl font-bold text-white">
                 {rankingLoading ? (
                   <div className="animate-pulse bg-slate-600 h-8 w-16 mx-auto rounded"></div>
@@ -192,7 +201,6 @@ export default function DashboardPage() {
                   ranking?.games_won || 0
                 )}
               </div>
->>>>>>> feature/login
               <div className="text-sm text-slate-400">Victoires</div>
             </CardContent>
           </Card>
@@ -200,15 +208,11 @@ export default function DashboardPage() {
           <Card className="glass-effect border-white/10">
             <CardContent className="p-6 text-center">
               <div className="text-2xl font-bold text-white">
-<<<<<<< HEAD
-                {profile?.games_played ? Math.round((profile.games_won / profile.games_played) * 100) : 0}%
-=======
                 {rankingLoading ? (
                   <div className="animate-pulse bg-slate-600 h-8 w-16 mx-auto rounded"></div>
                 ) : (
                   `${getWinRate()}%`
                 )}
->>>>>>> feature/login
               </div>
               <div className="text-sm text-slate-400">Taux de Victoire</div>
             </CardContent>
@@ -294,21 +298,13 @@ export default function DashboardPage() {
                     <div className="flex items-center space-x-4">
                       <Avatar className="h-10 w-10">
                         <AvatarFallback className="bg-blue-600 text-white">
-<<<<<<< HEAD
-                          {(room as any).profiles?.username?.charAt(0).toUpperCase() || 'U'}
-=======
                           {(room as any).host?.pseudo?.charAt(0).toUpperCase() || 'U'}
->>>>>>> feature/login
                         </AvatarFallback>
                       </Avatar>
                       <div>
                         <h3 className="font-medium text-white">{room.name}</h3>
                         <div className="flex items-center space-x-2 text-sm text-slate-400">
-<<<<<<< HEAD
-                          <span>Hôte: {(room as any).profiles?.username || 'Inconnu'}</span>
-=======
                           <span>Hôte: {(room as any).host?.pseudo || 'Inconnu'}</span>
->>>>>>> feature/login
                           <Badge variant="secondary" className="text-xs">
                             <Clock className="h-3 w-3 mr-1" />
                             {room.time_control}
@@ -325,9 +321,9 @@ export default function DashboardPage() {
                         size="sm"
                         onClick={() => joinRoom(room.id)}
                         className="chess-gradient hover:opacity-90"
-                        disabled={room.host_id === profile?.id}
+                        disabled={room.host_id === userProfile?.id}
                       >
-                        {room.host_id === profile?.id ? 'Votre salle' : 'Rejoindre'}
+                        {room.host_id === userProfile?.id ? 'Votre salle' : 'Rejoindre'}
                       </Button>
                     </div>
                   </div>

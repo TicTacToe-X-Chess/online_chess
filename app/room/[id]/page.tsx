@@ -21,34 +21,6 @@ interface RoomWithProfiles extends Room {
   guest?: UserProfile;
 }
 
-// Profil hote de test
-const hostProfile: UserProfile = {
-  id: 'mock-user-1',
-  pseudo: 'Hote',
-  avatar_url: undefined,
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-  games_played: 42,
-  games_won: 21,
-  rating: 1300,
-  is_online: true,
-  last_seen: new Date().toISOString()
-};
-
-// Profil invité de test
-const guestProfile: UserProfile = {
-  id: 'mock-user-2',
-  pseudo: 'Invité',
-  avatar_url: undefined,
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-  games_played: 42,
-  games_won: 21,
-  rating: 1150,
-  is_online: true,
-  last_seen: new Date().toISOString()
-};
-
 // Vérification si en développement ou non --> Pour les test
 // const isLocalTest = process.env.NODE_ENV === 'development';
 const isLocalTest = false;
@@ -57,12 +29,13 @@ const isLocalTest = false;
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
-  const profile = isLocalTest ? hostProfile : useAuth().profile;
+  const { user } = useAuth();
   const roomId = params.id as string;
   const [room, setRoom] = useState<RoomWithProfiles | null>(null);
   const [loading, setLoading] = useState(true);
   const [spectatorCount, setSpectatorCount] = useState(0);
-
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const supabase = createClient();
 
   // Initialisation de l'echiquier
   const {
@@ -74,6 +47,25 @@ export default function RoomPage() {
     gameReason,
     turn
   } = useChessEngine();
+
+  // Récupérer le profil utilisateur
+  useEffect(() => {
+    async function getUserProfile() {
+      if (!user) return;
+      
+      const { data, error } = await supabase
+        .from('user_public')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      
+      if (!error && data) {
+        setUserProfile(data);
+      }
+    }
+
+    getUserProfile();
+  }, [user, supabase]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -108,47 +100,27 @@ export default function RoomPage() {
   /* --- Récupération des informations de la salle --- */
   const fetchRoom = async () => {
     try {
-      // Cas de test sans bdd ou avec
-      if (isLocalTest) {
-        setRoom({
-          id: 'room-1',
-          name: 'Salle de Test',
-          room_code: 'TEST123',
-          status: 'finished',
-          time_control: '5+3',
-          is_private: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          max_spectators: 10,
-          host_id: hostProfile.id,
-          guest_id: guestProfile.id,
-          host: hostProfile,
-          guest: guestProfile,
-        });
-        setSpectatorCount(3);
-      } else {
-        const { data, error } = await supabase
-          .from('rooms')
-          .select(`
-            *,
-            host:user_public!rooms_host_id_fkey(*),
-            guest:user_public!rooms_guest_id_fkey(*)
-          `)
-          .eq('id', roomId)
-          .single();
+      const { data, error } = await supabase
+        .from('rooms')
+        .select(`
+          *,
+          host:user_public!rooms_host_id_fkey(*),
+          guest:user_public!rooms_guest_id_fkey(*)
+        `)
+        .eq('id', roomId)
+        .single();
 
-        if (error) {
-          if (error.code === 'PGRST116') {
-            toast.error('Cette salle n\'existe pas');
-            router.push('/dashboard');
-            return;
-          }
-          throw error;
+      if (error) {
+        if (error.code === 'PGRST116') {
+          toast.error('Cette salle n\'existe pas');
+          router.push('/dashboard');
+          return;
         }
-
-        setRoom(data as RoomWithProfiles);
-        fetchSpectators();
+        throw error;
       }
+
+      setRoom(data as RoomWithProfiles);
+      fetchSpectators();
     } catch (error) {
       console.error('Error fetching room:', error);
       toast.error('Erreur lors du chargement de la salle');
@@ -167,7 +139,7 @@ export default function RoomPage() {
 
       if (error) throw error;
 
-      setSpectatorCount(isLocalTest ? 3 : (count ?? 0));
+      setSpectatorCount(count || 0);
     } catch (error) {
       console.error('Error fetching spectators:', error);
     }
@@ -175,32 +147,51 @@ export default function RoomPage() {
 
   /* --- Fonction permettant de rejoindre la salle en tant que spectateur --- */
   const joinAsSpectator = async () => {
-    if (!profile || !room) return;
+    if (!userProfile || !room) return;
 
     try {
-      // En cas de test avec bdd seulement
-      if (!isLocalTest) {
-        const { error } = await supabase
-          .from('spectators')
-          .insert({
-            room_id: roomId,
-            user_id: profile.id,
-          });
+      const { error } = await supabase
+        .from('spectators')
+        .insert({
+          room_id: roomId,
+          user_id: userProfile.id,
+        });
 
-        // 23505 = Conflit unique --> Utilisateur déja spectateur
-        if (error) {
-          if (error.code === '23505') {
-            toast.info('Vous êtes déjà spectateur de cette partie');
-            return;
-          }
-          throw error;
+      // 23505 = Conflit unique --> Utilisateur déja spectateur
+      if (error) {
+        if (error.code === '23505') {
+          toast.info('Vous êtes déjà spectateur de cette partie');
+          return;
         }
-
-        toast.success('Vous regardez maintenant cette partie');
+        throw error;
       }
+
+      toast.success('Vous regardez maintenant cette partie');
     } catch (error) {
       console.error('Error joining as spectator:', error);
       toast.error('Impossible de rejoindre en tant que spectateur');
+    }
+  };
+
+  /* -- Fonction pour rejoindre en tant que joueur --- */
+  const joinAsPlayer = async () => {
+    if (!userProfile || !room || room.guest_id) return;
+
+    try {
+      const { error } = await supabase
+        .from('rooms')
+        .update({ 
+          guest_id: userProfile.id,
+          status: 'playing'
+        })
+        .eq('id', roomId);
+
+      if (error) throw error;
+
+      toast.success('Vous avez rejoint la partie !');
+    } catch (error) {
+      console.error('Error joining as player:', error);
+      toast.error('Impossible de rejoindre la partie');
     }
   };
 
@@ -212,7 +203,7 @@ export default function RoomPage() {
     }
   };
 
-  /* --- Copie le lien complet de la salle --- */
+  /* --- Copie du lien complet de la salle --- */
   const shareRoom = () => {
     const url = window.location.href;
     navigator.clipboard.writeText(url);
@@ -255,10 +246,10 @@ export default function RoomPage() {
   }
 
   // Vérification des joueurs présents dans la salle
-  const isHost = profile?.id === room.host_id;
-  const isGuest = profile?.id === room.guest_id;
+  const isHost = userProfile?.id === room.host_id;
+  const isGuest = userProfile?.id === room.guest_id;
   const isPlayer = isHost || isGuest;
-  const canJoin = !room.guest_id && !isHost && room.status === 'waiting';
+  const canJoin = !room.guest_id && !isHost && room.status === 'waiting' && userProfile;
 
 
   /* --- Contenu HTML --- */
@@ -429,7 +420,6 @@ export default function RoomPage() {
                   </div>
                   <div className="w-3 h-3 bg-white rounded-full"></div>
                 </div>
-
                 {/* Invité */}
                 {room.guest ? (
                   <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5">
@@ -469,13 +459,16 @@ export default function RoomPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {canJoin && (
-                  <Button className="w-full chess-gradient hover:opacity-90">
+                  <Button 
+                    className="w-full chess-gradient hover:opacity-90"
+                    onClick={joinAsPlayer}
+                  >
                     <Users className="mr-2 h-4 w-4" />
                     Rejoindre la Partie
                   </Button>
                 )}
                 
-                {!isPlayer && (
+                {!isPlayer && userProfile && (
                   <Button
                     variant="outline"
                     className="w-full border-white/20 hover:bg-white/10"
@@ -486,7 +479,20 @@ export default function RoomPage() {
                   </Button>
                 )}
 
-                {room.status === 'waiting' && !canJoin && !isPlayer && (
+                {!userProfile && (
+                  <div className="text-center py-4">
+                    <p className="text-sm text-slate-400 mb-3">
+                      Connectez-vous pour rejoindre ou regarder cette partie
+                    </p>
+                    <Link href="/auth/login">
+                      <Button variant="outline" className="border-white/20 hover:bg-white/10">
+                        Se connecter
+                      </Button>
+                    </Link>
+                  </div>
+                )}
+
+                {room.status === 'waiting' && !canJoin && !isPlayer && userProfile && (
                   <div className="text-center py-4">
                     <p className="text-sm text-slate-400">
                       Cette partie est complète ou vous ne pouvez pas la rejoindre
