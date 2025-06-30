@@ -58,22 +58,53 @@ export async function middleware(request: NextRequest) {
     data: { session },
   } = await supabase.auth.getSession();
 
-  // Protected routes
-  const protectedRoutes = ['/dashboard', '/create-room', '/room'];
+  //(nécessitent une connexion)
+  const protectedRoutes = ['/dashboard', '/create-room', '/room', '/profile'];
   const isProtectedRoute = protectedRoutes.some(route =>
     request.nextUrl.pathname.startsWith(route)
   );
 
-  // Redirect to auth if accessing protected route without session
+  //(accessibles sans connexion)
+  const publicRoutes = [
+    '/',
+    '/auth',
+    '/auth/login',
+    '/auth/register',
+    '/leaderboard',
+  ];
+  const isPublicRoute = publicRoutes.some(route =>
+    request.nextUrl.pathname === route || request.nextUrl.pathname.startsWith(route)
+  );
+
+  //Autoriser les fichiers statiques et API
+  if (
+    request.nextUrl.pathname.startsWith('/_next') ||
+    request.nextUrl.pathname.startsWith('/api') ||
+    request.nextUrl.pathname.includes('.')
+  ) {
+    return response;
+  }
+
+  //Autoriser les routes publiques
+  if (isPublicRoute) {
+    return response;
+  }
+
+  //Rediriger vers login si route protégée sans session
   if (isProtectedRoute && !session) {
     return NextResponse.redirect(new URL('/auth/login', request.url));
   }
 
-  // Redirect to dashboard if accessing auth with session
+  //Rediriger vers dashboard si utilisateur connecté accède aux pages d'auth
   if ((request.nextUrl.pathname === '/auth' || 
        request.nextUrl.pathname === '/auth/login' || 
        request.nextUrl.pathname === '/auth/register') && session) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
+  }
+
+  //Rediriger vers home page pour toute autre route
+  if (!isPublicRoute && !isProtectedRoute) {
+    return NextResponse.redirect(new URL('/', request.url));
   }
 
   return response;
