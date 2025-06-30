@@ -12,17 +12,29 @@ import Link from 'next/link';
 
 interface UserPublic {
   id: string;
+  email: string;
   pseudo: string;
   created_at: string;
-  updated_at: string;
-  games_played: number;
-  games_won: number;
-  rating: number;
-  is_online: boolean;
-  last_seen: string;
 }
 
-interface LeaderboardUser extends UserPublic {
+interface UserRanking {
+  id: string;
+  user_id: string;
+  games_played: number;
+  games_won: number;
+  games_lost: number;
+  elo_rating: number;
+  created_at: string;
+}
+
+interface LeaderboardUser {
+  id: string;
+  pseudo: string;
+  email: string;
+  games_played: number;
+  games_won: number;
+  games_lost: number;
+  elo_rating: number;
   rank: number;
   winRate: number;
 }
@@ -44,29 +56,45 @@ export default function LeaderboardPage() {
     try {
       setLoading(true);
 
-      // Récupérer tous les utilisateurs triés par rating
+      // Récupérer les données des deux tables avec une jointure
       const { data, error } = await supabase
-        .from('users_publics') // ← Nom de table corrigé
-        .select('*')
-        .order('rating', { ascending: false })
+        .from('user_ranking')
+        .select(`
+          *,
+          user_public!inner(
+            id,
+            pseudo,
+            email,
+            created_at
+          )
+        `)
+        .order('elo_rating', { ascending: false })
         .limit(100); // Top 100 joueurs
 
       if (error) throw error;
 
-      // Calculer les rangs et les taux de victoire
-      const leaderboardData: LeaderboardUser[] = (data || []).map((user, index) => ({
-        ...user,
+      // Transformer les données pour le leaderboard
+      const leaderboardData: LeaderboardUser[] = (data || []).map((ranking, index) => ({
+        id: ranking.user_public.id,
+        pseudo: ranking.user_public.pseudo,
+        email: ranking.user_public.email,
+        games_played: ranking.games_played,
+        games_won: ranking.games_won,
+        games_lost: ranking.games_lost,
+        elo_rating: ranking.elo_rating,
         rank: index + 1,
-        winRate: user.games_played > 0 ? Math.round((user.games_won / user.games_played) * 100) : 0,
+        winRate: ranking.games_played > 0 ? Math.round((ranking.games_won / ranking.games_played) * 100) : 0,
       }));
 
       setUsers(leaderboardData);
 
       // Calculer les statistiques générales
-      if (data && data.length > 0) {
-        const totalPlayers = data.length;
-        const averageRating = Math.round(data.reduce((sum, u) => sum + u.rating, 0) / totalPlayers);
-        const totalGames = data.reduce((sum, u) => sum + u.games_played, 0);
+      if (leaderboardData.length > 0) {
+        const totalPlayers = leaderboardData.length;
+        const averageRating = Math.round(
+          leaderboardData.reduce((sum, u) => sum + u.elo_rating, 0) / totalPlayers
+        );
+        const totalGames = leaderboardData.reduce((sum, u) => sum + u.games_played, 0);
 
         setStats({
           totalPlayers,
@@ -149,7 +177,7 @@ export default function LeaderboardPage() {
             <CardContent className="p-6 text-center">
               <TrendingUp className="h-8 w-8 text-green-400 mx-auto mb-2" />
               <div className="text-2xl font-bold text-white">{stats.averageRating}</div>
-              <div className="text-sm text-slate-400">Rating Moyen</div>
+              <div className="text-sm text-slate-400">Rating ELO Moyen</div>
             </CardContent>
           </Card>
           
@@ -182,7 +210,7 @@ export default function LeaderboardPage() {
                       </AvatarFallback>
                     </Avatar>
                     <h3 className="font-bold text-white text-lg">{users[1].pseudo}</h3>
-                    <div className="text-2xl font-bold text-gray-400 mt-2">{users[1].rating}</div>
+                    <div className="text-2xl font-bold text-gray-400 mt-2">{users[1].elo_rating}</div>
                     <div className="text-sm text-slate-400">ELO Rating</div>
                   </CardContent>
                 </Card>
@@ -203,7 +231,7 @@ export default function LeaderboardPage() {
                       </AvatarFallback>
                     </Avatar>
                     <h3 className="font-bold text-white text-xl">{users[0].pseudo}</h3>
-                    <div className="text-3xl font-bold text-yellow-400 mt-2">{users[0].rating}</div>
+                    <div className="text-3xl font-bold text-yellow-400 mt-2">{users[0].elo_rating}</div>
                     <div className="text-sm text-slate-400">ELO Rating</div>
                     <div className="mt-2">
                       <Badge className="bg-yellow-400/20 text-yellow-400 border-yellow-400/50">
@@ -229,7 +257,7 @@ export default function LeaderboardPage() {
                       </AvatarFallback>
                     </Avatar>
                     <h3 className="font-bold text-white text-lg">{users[2].pseudo}</h3>
-                    <div className="text-2xl font-bold text-amber-600 mt-2">{users[2].rating}</div>
+                    <div className="text-2xl font-bold text-amber-600 mt-2">{users[2].elo_rating}</div>
                     <div className="text-sm text-slate-400">ELO Rating</div>
                   </CardContent>
                 </Card>
@@ -263,23 +291,24 @@ export default function LeaderboardPage() {
             ) : (
               <div className="overflow-x-auto">
                 {/* Header du tableau */}
-                <div className="grid grid-cols-6 gap-4 p-4 border-b border-white/10 font-semibold text-slate-300 text-sm">
+                <div className="grid grid-cols-7 gap-4 p-4 border-b border-white/10 font-semibold text-slate-300 text-sm">
                   <div className="col-span-1">Rang</div>
                   <div className="col-span-2">Joueur</div>
                   <div className="col-span-1 text-center">Parties</div>
                   <div className="col-span-1 text-center">Victoires</div>
+                  <div className="col-span-1 text-center">Défaites</div>
                   <div className="col-span-1 text-center">Winrate</div>
                 </div>
 
                 {/* Lignes du tableau */}
                 <div className="space-y-1">
                   {users.map((user) => {
-                    const category = getRatingCategory(user.rating);
+                    const category = getRatingCategory(user.elo_rating);
                     
                     return (
                       <div
                         key={user.id}
-                        className={`grid grid-cols-6 gap-4 p-4 rounded-lg transition-all hover:bg-white/5 ${
+                        className={`grid grid-cols-7 gap-4 p-4 rounded-lg transition-all hover:bg-white/5 ${
                           user.rank <= 3 ? 'bg-white/5 border border-white/10' : 'bg-white/[0.02]'
                         }`}
                       >
@@ -301,12 +330,9 @@ export default function LeaderboardPage() {
                           <div className="flex-1">
                             <div className="flex items-center space-x-2">
                               <h3 className="font-semibold text-white text-lg">{user.pseudo}</h3>
-                              {user.is_online && (
-                                <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-                              )}
                             </div>
                             <div className="flex items-center space-x-2">
-                              <span className="text-xl font-bold text-white">{user.rating}</span>
+                              <span className="text-xl font-bold text-white">{user.elo_rating}</span>
                               <span className="text-sm text-slate-400">ELO</span>
                               <span className={`text-sm font-medium ${category.color}`}>
                                 {category.name}
@@ -325,6 +351,12 @@ export default function LeaderboardPage() {
                         <div className="col-span-1 text-center flex flex-col justify-center">
                           <div className="text-lg font-semibold text-green-400">{user.games_won}</div>
                           <div className="text-xs text-slate-400">victoires</div>
+                        </div>
+
+                        {/* Défaites */}
+                        <div className="col-span-1 text-center flex flex-col justify-center">
+                          <div className="text-lg font-semibold text-red-400">{user.games_lost}</div>
+                          <div className="text-xs text-slate-400">défaites</div>
                         </div>
 
                         {/* Winrate */}
