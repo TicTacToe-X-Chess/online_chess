@@ -21,7 +21,7 @@ interface RoomWithProfiles extends Room {
   guest?: Profile;
 }
 
-// Profil de test
+// Profil hote de test
 const hostProfile: Profile = {
   id: 'mock-user-1',
   username: 'Hote',
@@ -35,7 +35,7 @@ const hostProfile: Profile = {
   last_seen: new Date().toISOString()
 };
 
-// Profil de test
+// Profil invité de test
 const guestProfile: Profile = {
   id: 'mock-user-2',
   username: 'Invité',
@@ -50,8 +50,8 @@ const guestProfile: Profile = {
 }; 
 
 // Vérification si en développement ou non --> Pour les test
-const isLocalTest = process.env.NODE_ENV === 'development';
-//const isLocalTest = false;
+// const isLocalTest = process.env.NODE_ENV === 'development';
+const isLocalTest = false;
 
 
 export default function RoomPage() {
@@ -107,7 +107,7 @@ export default function RoomPage() {
   /* --- Récupération des informations de la salle --- */
   const fetchRoom = async () => {
     try {
-      // Cas de test ou non
+      // Cas de test sans bdd ou avec
       if (isLocalTest) {
         setRoom({
           id: 'room-1',
@@ -178,23 +178,26 @@ export default function RoomPage() {
     if (!profile || !room) return;
 
     try {
-      /* const { error } = await supabase
-        .from('spectators')
-        .insert({
-          room_id: roomId,
-          user_id: profile.id,
-        });
+      // En cas de test avec bdd seulement
+      if (!isLocalTest) {
+        const { error } = await supabase
+          .from('spectators')
+          .insert({
+            room_id: roomId,
+            user_id: profile.id,
+          });
 
-      // 23505 = Conflit unique --> Utilisateur déja spectateur
-      if (error) {
-        if (error.code === '23505') {
-          toast.info('Vous êtes déjà spectateur de cette partie');
-          return;
+        // 23505 = Conflit unique --> Utilisateur déja spectateur
+        if (error) {
+          if (error.code === '23505') {
+            toast.info('Vous êtes déjà spectateur de cette partie');
+            return;
+          }
+          throw error;
         }
-        throw error;
-      }
 
-      toast.success('Vous regardez maintenant cette partie'); */
+        toast.success('Vous regardez maintenant cette partie');
+      }
     } catch (error) {
       console.error('Error joining as spectator:', error);
       toast.error('Impossible de rejoindre en tant que spectateur');
@@ -216,6 +219,7 @@ export default function RoomPage() {
     toast.success('Lien de la salle copié !');
   };
 
+  /* --- Chargement de la salle --- */
   if (loading) {
     return (
       <div className="min-h-screen">
@@ -230,6 +234,7 @@ export default function RoomPage() {
     );
   }
 
+  /* --- Salle introuvable --- */
   if (!room) {
     return (
       <div className="min-h-screen">
@@ -253,8 +258,9 @@ export default function RoomPage() {
   const isHost = profile?.id === room.host_id;
   const isGuest = profile?.id === room.guest_id;
   const isPlayer = isHost || isGuest;
-  const canJoin = !room.guest_id && isHost && room.status === 'waiting';
+  const canJoin = !room.guest_id && !isHost && room.status === 'waiting';
 
+  /* --- Contenu HTML --- */
   return (
     <div className="min-h-screen">
       <Header />
@@ -319,7 +325,7 @@ export default function RoomPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Game Board Area */}
+          {/* Block du plateau de jeu + historique */}
           <div className="lg:col-span-2">
             {room.host_id && room.guest_id ? (
               <>
@@ -372,6 +378,7 @@ export default function RoomPage() {
             )}
           </div>
 
+          { /* Modale de fin de partie */ }
           {isGameOver && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
               <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-2xl w-[90%] max-w-md text-center">
@@ -394,7 +401,7 @@ export default function RoomPage() {
 
           {/* Sidebar */}
           <div className="space-y-6">
-            {/* Players */}
+            {/* Joueurs */}
             <Card className="glass-effect border-white/10">
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2 text-white">
@@ -403,7 +410,7 @@ export default function RoomPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Host */}
+                {/* Hote */}
                 <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5">
                   <Avatar className="h-10 w-10">
                     <AvatarFallback className="bg-blue-600 text-white">
@@ -422,7 +429,7 @@ export default function RoomPage() {
                   <div className="w-3 h-3 bg-white rounded-full"></div>
                 </div>
 
-                {/* Guest */}
+                {/* Invité */}
                 {room.guest ? (
                   <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5">
                     <Avatar className="h-10 w-10">
