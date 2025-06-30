@@ -1,11 +1,16 @@
-import { Crown, Users, Shield, Zap, Trophy, Play } from 'lucide-react';
+'use client';
+
+import { Crown, Users, Shield, Zap, Trophy, Play, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Header } from '@/components/header';
+import { useAuth } from '@/hooks/useAuth';
 import Link from 'next/link';
 
 export default function HomePage() {
+  const { user } = useAuth();
+
   const features = [
     {
       icon: Users,
@@ -51,23 +56,50 @@ export default function HomePage() {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Link href="/auth/register">
-              <Button size="lg" className="chess-gradient hover:opacity-90 transition-all hover-lift text-lg px-8 py-6">
-                <Play className="mr-2 h-5 w-5" />
-                Commencer à Jouer
-              </Button>
-            </Link>
-            <Link href="/leaderboard">
-              <Button size="lg" variant="outline" className="border-white/20 hover:bg-white/10 text-lg px-8 py-6">
-                <Crown className="mr-2 h-5 w-5" />
-                Voir le Classement
-              </Button>
-            </Link>
+            {user ? (
+              // Utilisateur connecté
+              <>
+                <Link href="/dashboard">
+                  <Button size="lg" className="chess-gradient hover:opacity-90 transition-all hover-lift text-lg px-8 py-6">
+                    <Trophy className="mr-2 h-5 w-5" />
+                    Dashboard
+                  </Button>
+                </Link>
+                <Link href="/chat">
+                  <Button size="lg" variant="outline" className="border-green-400/50 hover:bg-green-400/10 text-green-400 text-lg px-8 py-6">
+                    <MessageCircle className="mr-2 h-5 w-5" />
+                    Test Chat
+                  </Button>
+                </Link>
+                <Link href="/leaderboard">
+                  <Button size="lg" variant="outline" className="border-white/20 hover:bg-white/10 text-lg px-8 py-6">
+                    <Crown className="mr-2 h-5 w-5" />
+                    Classement
+                  </Button>
+                </Link>
+              </>
+            ) : (
+              // Utilisateur non connecté
+              <>
+                <Link href="/auth/register">
+                  <Button size="lg" className="chess-gradient hover:opacity-90 transition-all hover-lift text-lg px-8 py-6">
+                    <Play className="mr-2 h-5 w-5" />
+                    Commencer à Jouer
+                  </Button>
+                </Link>
+                <Link href="/leaderboard">
+                  <Button size="lg" variant="outline" className="border-white/20 hover:bg-white/10 text-lg px-8 py-6">
+                    <Crown className="mr-2 h-5 w-5" />
+                    Voir le Classement
+                  </Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </section>
 
-      {/* Features Section */}
+      {/* Features Section avec le Chat en avant */}
       <section className="py-20 px-4">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-16">
@@ -78,7 +110,42 @@ export default function HomePage() {
               Une expérience d'échecs complète avec toutes les fonctionnalités modernes
             </p>
           </div>
+
+          {/* Section spéciale Chat en test - visible seulement pour les utilisateurs connectés */}
+          {user && (
+            <div className="mb-12">
+              <Card className="glass-effect border-green-400/30 hover-lift group bg-gradient-to-r from-green-600/10 to-blue-600/10">
+                <CardContent className="p-8 text-center">
+                  <div className="mb-4">
+                    <Badge className="bg-green-500/20 text-green-400 border-green-400/30 mb-4">
+                      🔥 En Test
+                    </Badge>
+                  </div>
+                  <MessageCircle className="h-16 w-16 text-green-400 mx-auto mb-6" />
+                  <h3 className="text-2xl font-bold mb-4 text-white">
+                    Chat Temps Réel
+                  </h3>
+                  <p className="text-slate-300 text-lg mb-6 max-w-2xl mx-auto">
+                    Testez notre nouveau système de chat en temps réel ! 
+                    Communicquez avec les joueurs et spectateurs pendant les parties.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                    <Link href="/chat">
+                      <Button size="lg" className="bg-green-600 hover:bg-green-700 text-white text-lg px-8 py-4">
+                        <MessageCircle className="mr-2 h-5 w-5" />
+                        Tester le Chat
+                      </Button>
+                    </Link>
+                    <div className="text-sm text-slate-400">
+                      • Messages en temps réel • Joueurs + Spectateurs • Interface moderne
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
           
+          {/* Grille des fonctionnalités existantes */}
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             {features.map((feature, index) => (
               <Card key={index} className="glass-effect hover-lift border-white/10 group">

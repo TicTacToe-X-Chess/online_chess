@@ -58,13 +58,13 @@ export async function middleware(request: NextRequest) {
     data: { session },
   } = await supabase.auth.getSession();
 
-  //(nécessitent une connexion)
-  const protectedRoutes = ['/dashboard', '/create-room', '/room', '/profile'];
+  // ✅ Routes protégées (nécessitent une connexion)
+  const protectedRoutes = ['/dashboard', '/create-room', '/room', '/profile', '/chat'];
   const isProtectedRoute = protectedRoutes.some(route =>
     request.nextUrl.pathname.startsWith(route)
   );
 
-  //(accessibles sans connexion)
+  // ✅ Routes publiques (accessibles sans connexion)
   const publicRoutes = [
     '/',
     '/auth',
@@ -76,7 +76,7 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname === route || request.nextUrl.pathname.startsWith(route)
   );
 
-  //Autoriser les fichiers statiques et API
+  // Autoriser les fichiers statiques et API
   if (
     request.nextUrl.pathname.startsWith('/_next') ||
     request.nextUrl.pathname.startsWith('/api') ||
@@ -85,24 +85,24 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  //Autoriser les routes publiques
+  // Autoriser les routes publiques
   if (isPublicRoute) {
     return response;
   }
 
-  //Rediriger vers login si route protégée sans session
+  // ✅ Rediriger vers login si route protégée sans session
   if (isProtectedRoute && !session) {
     return NextResponse.redirect(new URL('/auth/login', request.url));
   }
 
-  //Rediriger vers dashboard si utilisateur connecté accède aux pages d'auth
+  // Rediriger vers dashboard si utilisateur connecté accède aux pages d'auth
   if ((request.nextUrl.pathname === '/auth' || 
        request.nextUrl.pathname === '/auth/login' || 
        request.nextUrl.pathname === '/auth/register') && session) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  //Rediriger vers home page pour toute autre route
+  // Rediriger vers home page pour toute autre route
   if (!isPublicRoute && !isProtectedRoute) {
     return NextResponse.redirect(new URL('/', request.url));
   }
