@@ -43,40 +43,31 @@ export function useRoom(roomId?: string) {
         timeControl: string;
         maxSpectators: number;
     }) => {
-        if (!profile) {
-            throw new Error('User must be authenticated to create a room');
-        }
+        // TEMP : désactive la vérification du profil
+        // if (!profile) {
+        //     throw new Error('User must be authenticated to create a room');
+        // }
 
         try {
             const roomCode = roomData.isPrivate ? generateRoomCode() : null;
 
-            const { data: newRoom, error: roomError } = await supabase
-                .from('rooms')
-                .insert({
-                    name: roomData.name,
-                    host_id: profile.id,
-                    is_private: roomData.isPrivate,
-                    room_code: roomCode,
-                    status: 'waiting',
-                    max_spectators: roomData.maxSpectators,
-                    time_control: roomData.timeControl,
-                })
-                .select()
-                .single();
+            // Retourne une fausse room simulée
+            const fakeRoom: Room = {
+                id: Math.random().toString(36).substring(2, 10),
+                name: roomData.name,
+                host_id: profile?.id || 'mock-user-id',
+                guest_id: undefined, // ✅ au lieu de null
+                is_private: roomData.isPrivate,
+                room_code: roomCode ?? undefined,
+                status: 'waiting',
+                max_spectators: roomData.maxSpectators,
+                time_control: roomData.timeControl,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            };
 
-            if (roomError) throw roomError;
 
-            const { error: participantError } = await supabase
-                .from('room_participants')
-                .insert({
-                    room_id: newRoom.id,
-                    user_id: profile.id,
-                    role: 'host',
-                });
-
-            if (participantError) throw participantError;
-
-            return newRoom;
+            return fakeRoom;
         } catch (error: any) {
             throw new Error(error.message || 'Failed to create room');
         }
