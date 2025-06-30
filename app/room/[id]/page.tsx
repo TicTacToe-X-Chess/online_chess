@@ -9,9 +9,11 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Header } from '@/components/header';
 import { useAuth } from '@/hooks/useAuth';
-import { createClient } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { Room, UserProfile } from '@/types/database';
 import { toast } from 'sonner';
+import { Chessboard } from 'react-chessboard';
+import { useChessEngine } from '@/hooks/useChessEngine';
 import Link from 'next/link';
 
 interface RoomWithProfiles extends Room {
@@ -19,17 +21,32 @@ interface RoomWithProfiles extends Room {
   guest?: UserProfile;
 }
 
+// Vérification si en développement ou non --> Pour les test
+// const isLocalTest = process.env.NODE_ENV === 'development';
+const isLocalTest = false;
+
+
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
+  const roomId = params.id as string;
   const [room, setRoom] = useState<RoomWithProfiles | null>(null);
   const [loading, setLoading] = useState(true);
   const [spectatorCount, setSpectatorCount] = useState(0);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const supabase = createClient();
 
-  const roomId = params.id as string;
+  // Initialisation de l'echiquier
+  const {
+    fen,
+    makeMove,
+    resetGame,
+    history,
+    isGameOver,
+    gameReason,
+    turn
+  } = useChessEngine();
 
   // Récupérer le profil utilisateur
   useEffect(() => {
@@ -53,20 +70,23 @@ export default function RoomPage() {
   useEffect(() => {
     if (!roomId) return;
 
+    // Récupération des infos à l'ouverture de la salle
     fetchRoom();
     
-    // Subscribe to room changes
+    /* --- Actualisation de la salle a chaque changements en temps réel --- */
     const subscription = supabase
       .channel(`room-${roomId}`)
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
         () => {
+          // Actualisation de la salle
           fetchRoom();
         }
       )
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'spectators', filter: `room_id=eq.${roomId}` },
         () => {
+          // Actualisation de la salle
           fetchSpectators();
         }
       )
@@ -77,6 +97,7 @@ export default function RoomPage() {
     };
   }, [roomId]);
 
+  /* --- Récupération des informations de la salle --- */
   const fetchRoom = async () => {
     try {
       const { data, error } = await supabase
@@ -108,6 +129,7 @@ export default function RoomPage() {
     }
   };
 
+  /* --- Compteur du nombre de spectateurs --- */
   const fetchSpectators = async () => {
     try {
       const { count, error } = await supabase
@@ -116,12 +138,14 @@ export default function RoomPage() {
         .eq('room_id', roomId);
 
       if (error) throw error;
+
       setSpectatorCount(count || 0);
     } catch (error) {
       console.error('Error fetching spectators:', error);
     }
   };
 
+  /* --- Fonction permettant de rejoindre la salle en tant que spectateur --- */
   const joinAsSpectator = async () => {
     if (!userProfile || !room) return;
 
@@ -133,6 +157,7 @@ export default function RoomPage() {
           user_id: userProfile.id,
         });
 
+      // 23505 = Conflit unique --> Utilisateur déja spectateur
       if (error) {
         if (error.code === '23505') {
           toast.info('Vous êtes déjà spectateur de cette partie');
@@ -148,6 +173,7 @@ export default function RoomPage() {
     }
   };
 
+  /* -- Fonction pour rejoindre en tant que joueur --- */
   const joinAsPlayer = async () => {
     if (!userProfile || !room || room.guest_id) return;
 
@@ -169,6 +195,7 @@ export default function RoomPage() {
     }
   };
 
+  /* --- Copie du code d’accès à la salle --- */
   const copyRoomCode = () => {
     if (room?.room_code) {
       navigator.clipboard.writeText(room.room_code);
@@ -176,12 +203,14 @@ export default function RoomPage() {
     }
   };
 
+  /* --- Copie du lien complet de la salle --- */
   const shareRoom = () => {
     const url = window.location.href;
     navigator.clipboard.writeText(url);
     toast.success('Lien de la salle copié !');
   };
 
+  /* --- Chargement de la salle --- */
   if (loading) {
     return (
       <div className="min-h-screen">
@@ -196,6 +225,7 @@ export default function RoomPage() {
     );
   }
 
+  /* --- Salle introuvable --- */
   if (!room) {
     return (
       <div className="min-h-screen">
@@ -215,11 +245,14 @@ export default function RoomPage() {
     );
   }
 
+  // Vérification des joueurs présents dans la salle
   const isHost = userProfile?.id === room.host_id;
   const isGuest = userProfile?.id === room.guest_id;
   const isPlayer = isHost || isGuest;
   const canJoin = !room.guest_id && !isHost && room.status === 'waiting' && userProfile;
 
+
+  /* --- Contenu HTML --- */
   return (
     <div className="min-h-screen">
       <Header />
@@ -284,33 +317,83 @@ export default function RoomPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Game Board Area */}
+          {/* Block du plateau de jeu + historique */}
           <div className="lg:col-span-2">
-            <Card className="glass-effect border-white/10 h-96">
-              <CardContent className="p-6 flex items-center justify-center h-full">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Users className="h-8 w-8 text-blue-400" />
-                  </div>
-                  <h3 className="text-xl font-semibold text-white mb-2">
-                    Plateau d'Échecs
-                  </h3>
-                  <p className="text-slate-400 mb-4">
-                    Le plateau d'échecs sera affiché ici une fois la partie commencée
-                  </p>
-                  {room.status === 'waiting' && (
-                    <Badge variant="secondary" className="bg-yellow-600/20 text-yellow-400 border-yellow-400/50">
-                      En attente d'un adversaire...
-                    </Badge>
+            {room.host_id && room.guest_id ? (
+              <>
+              <div>
+                <Chessboard
+                  position={fen}
+                  onPieceDrop={(sourceSquare, targetSquare) => {
+                    const move = makeMove({ from: sourceSquare, to: targetSquare, promotion: 'q' });
+                    return move !== null;
+                  } } />
+              </div>
+              <Card className="glass-effect border-white/10 mt-4">
+                <CardHeader>
+                  <CardTitle className="text-white">Historique des Coups</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {history.length === 0 ? (
+                    <p className="text-slate-400">Aucun coup joué pour l’instant.</p>
+                  ) : (
+                    <ol className="text-white space-y-1 text-sm list-decimal list-inside">
+                      {history.map((move, index) => (
+                        <li key={index}>{move}</li>
+                      ))}
+                    </ol>
                   )}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+              </>
+            ) : (
+              <Card className="glass-effect border-white/10 h-96">
+                <CardContent className="p-6 flex items-center justify-center h-full">
+                  <div className="text-center">
+                    <div className="w-16 h-16 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Users className="h-8 w-8 text-blue-400" />
+                    </div>
+                    <h3 className="text-xl font-semibold text-white mb-2">
+                      Plateau d'Échecs
+                    </h3>
+                    <p className="text-slate-400 mb-4">
+                      Le plateau d'échecs sera affiché ici une fois la partie commencée
+                    </p>
+                    {room.status === 'waiting' && (
+                      <Badge variant="secondary" className="bg-yellow-600/20 text-yellow-400 border-yellow-400/50">
+                        En attente d'un adversaire...
+                      </Badge>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
+
+          { /* Modale de fin de partie */ }
+          {isGameOver && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-2xl w-[90%] max-w-md text-center">
+                <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-white">
+                  Partie terminée
+                </h2>
+                <p className="text-gray-600 dark:text-gray-300 mb-6">
+                  {turn === 'w' ? 'Victoire des noirs' : 'Victoire des blancs'}
+                </p>
+                <p>{gameReason}</p>
+                <button
+                  onClick={resetGame}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition"
+                >
+                  Rejouer
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Sidebar */}
           <div className="space-y-6">
-            {/* Players */}
+            {/* Joueurs */}
             <Card className="glass-effect border-white/10">
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2 text-white">
@@ -319,7 +402,7 @@ export default function RoomPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Host */}
+                {/* Hote */}
                 <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5">
                   <Avatar className="h-10 w-10">
                     <AvatarFallback className="bg-blue-600 text-white">
@@ -337,8 +420,7 @@ export default function RoomPage() {
                   </div>
                   <div className="w-3 h-3 bg-white rounded-full"></div>
                 </div>
-
-                {/* Guest */}
+                {/* Invité */}
                 {room.guest ? (
                   <div className="flex items-center space-x-3 p-3 rounded-lg bg-white/5">
                     <Avatar className="h-10 w-10">
