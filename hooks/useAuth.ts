@@ -25,17 +25,6 @@ export function useAuth() {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
-
-      if (user) {
-        // Récupérer le profil utilisateur
-        const { data: profile } = await supabase
-          .from('user_public')
-          .select('*')
-          .eq('id', user.id)
-          .single();
-        
-        setProfile(profile);
-      }
       
       setLoading(false);
     };

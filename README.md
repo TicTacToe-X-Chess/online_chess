@@ -220,10 +220,4 @@ Ce projet est en développement actif. Les contributions sont les bienvenues !
 4. Push vers la branche (`git push origin feature/nouvelle-fonctionnalite`)
 5. Ouvrir une Pull Request
 
-## 📄 Licence
-
-Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
-
----
-
 **ChessMaster** - Développé avec ❤️ par l'équipe de développement pour offrir la meilleure expérience d'échecs en ligne.

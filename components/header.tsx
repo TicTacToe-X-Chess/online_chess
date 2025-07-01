@@ -16,7 +16,7 @@ import { useUserRanking } from '@/hooks/useUserRanking';
 import Link from 'next/link';
 
 export function Header() {
-  const { profile, signOut, isAuthenticated } = useAuth();
+  const { user, profile, signOut, isAuthenticated } = useAuth(); // ✅ Ajouter user
   const { ranking } = useUserRanking(profile?.id || null);
 
   const handleSignOut = async () => {
@@ -47,17 +47,19 @@ export function Header() {
         </nav>
 
         <div className="flex items-center space-x-4">
-          {isAuthenticated && profile ? (
+          {isAuthenticated ? ( // ✅ Enlever "&& profile" pour afficher même sans profil
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center space-x-2 hover:bg-white/10">
                   <Avatar className="h-8 w-8">
                     <AvatarFallback className="bg-blue-600 text-white">
-                      {profile.pseudo.charAt(0).toUpperCase()}
+                      {profile?.pseudo?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'}
                     </AvatarFallback>
                   </Avatar>
                   <div className="hidden sm:flex flex-col items-start">
-                    <span className="text-sm font-medium">{profile.pseudo}</span>
+                    <span className="text-sm font-medium">
+                      {profile?.pseudo || user?.email || 'Utilisateur'}
+                    </span>
                     <Badge variant="secondary" className="text-xs">
                       {ranking?.elo_rating || 400} ELO
                     </Badge>
@@ -68,7 +70,7 @@ export function Header() {
                 <DropdownMenuItem className="flex items-center space-x-2">
                   <User className="h-4 w-4" />
                   <div className="flex flex-col">
-                    <span>{profile.pseudo}</span>
+                    <span>{profile?.pseudo || user?.email || 'Utilisateur'}</span>
                     <span className="text-xs text-muted-foreground">
                       {ranking ? `${ranking.games_played} parties • ${ranking.games_won} victoires` : 'Chargement...'}
                     </span>

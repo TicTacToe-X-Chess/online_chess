@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Send, MessageCircle, Users, ArrowLeft, Eye } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { Send, MessageCircle, ArrowLeft, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -50,12 +50,105 @@ export default function ChatTestPage() {
   const [userRole, setUserRole] = useState<'white' | 'black' | 'spectator'>('spectator');
   const [spectatorCount, setSpectatorCount] = useState(0);
   const supabase = createClient();
+  
+  // Gestion des connexions temps réel et reconnexion automatique
+  const subscriptionRef = useRef<any>(null);
+  const [isPageVisible, setIsPageVisible] = useState(true);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('connected');
 
-  // ID de la partie de test
   const TEST_GAME_ID = '463beb3e-686f-49c9-9264-02d3faef3e75';
 
+  // Gérer la reconnexion automatique lors des changements d'onglets (Alt+Tab)
   useEffect(() => {
-    // Attendre la fin du chargement de l'authentification
+    const handleVisibilityChange = () => {
+      const isVisible = !document.hidden;
+      setIsPageVisible(isVisible);
+      
+      if (isVisible && user) {
+        console.log('Page redevenue visible, reconnexion...');
+        reconnectRealtime();
+      } else {
+        console.log('Page cachée, nettoyage...');
+        cleanupSubscription();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      cleanupSubscription();
+    };
+  }, [user]);
+
+  // Vérifier périodiquement que la session utilisateur est toujours valide
+  useEffect(() => {
+    const checkSession = async () => {
+      if (!document.hidden && user) {
+        try {
+          const { data: { session }, error } = await supabase.auth.getSession();
+          if (error || !session) {
+            console.warn('Session invalide détectée:', error);
+            router.push('/auth/login');
+          }
+        } catch (error) {
+          console.error('Erreur lors de la vérification de session:', error);
+        }
+      }
+    };
+
+    const sessionInterval = setInterval(checkSession, 30000);
+    return () => clearInterval(sessionInterval);
+  }, [router, supabase, user]);
+
+  // Nettoyer proprement les souscriptions Supabase pour éviter les fuites mémoire
+  const cleanupSubscription = () => {
+    if (subscriptionRef.current) {
+      subscriptionRef.current.unsubscribe();
+      subscriptionRef.current = null;
+    }
+  };
+
+  // Reconnecter le chat temps réel après une déconnexion
+  const reconnectRealtime = async () => {
+    if (!user || !isPageVisible) return;
+    
+    setConnectionStatus('reconnecting');
+    
+    try {
+      cleanupSubscription();
+      
+      // Vérifier que la session est toujours valide avant de reconnecter
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error || !session) {
+        console.warn('Session invalide, redirection...');
+        router.push('/auth/login');
+        return;
+      }
+      
+      // Délai pour éviter les conflits de connexion
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      subscribeToMessages();
+      await fetchMessages();
+      
+      console.log('Reconnexion réussie');
+      setConnectionStatus('connected');
+    } catch (error) {
+      console.error('Erreur lors de la reconnexion:', error);
+      setConnectionStatus('disconnected');
+      
+      // Retry automatique après 5 secondes
+      setTimeout(() => {
+        if (document.visibilityState === 'visible') {
+          reconnectRealtime();
+        }
+      }, 5000);
+    }
+  };
+
+  // Initialisation du chat quand l'utilisateur est connecté
+  useEffect(() => {
     if (loading) return;
 
     if (!user) {
@@ -63,14 +156,22 @@ export default function ChatTestPage() {
       return;
     }
 
-    // Initialiser le chat une fois l'utilisateur connecté
     initializeTestGame();
     fetchMessages();
-    subscribeToMessages();
+    
+    // S'abonner aux messages seulement si la page est visible
+    if (isPageVisible) {
+      subscribeToMessages();
+    }
+    
     updateSpectatorCount();
-  }, [user, loading]);
 
-  // Charger les informations de la partie existante
+    return () => {
+      cleanupSubscription();
+    };
+  }, [user, loading, isPageVisible]);
+
+  // Charger les informations de la partie depuis la base de données
   const initializeTestGame = async () => {
     if (!user?.id) return;
 
@@ -95,7 +196,7 @@ export default function ChatTestPage() {
         const role = determineUserRole(gameData, user.id);
         setUserRole(role);
 
-        // Récupérer les pseudos des joueurs
+        // Récupérer les pseudos des joueurs pour l'affichage
         const [whitePlayerData, blackPlayerData] = await Promise.all([
           gameData.white_player ? supabase
             .from('user_public')
@@ -123,12 +224,12 @@ export default function ChatTestPage() {
     }
   };
 
-  // Simulation du nombre de spectateurs connectés
+  // Générer un nombre aléatoire de spectateurs pour la démo
   const updateSpectatorCount = () => {
     setSpectatorCount(Math.floor(Math.random() * 10) + 1);
   };
 
-  // Récupérer l'historique des messages et enrichir avec les pseudos
+  // Charger l'historique des messages avec les pseudos des expéditeurs
   const fetchMessages = async () => {
     try {
       const { data, error } = await supabase
@@ -150,7 +251,7 @@ export default function ChatTestPage() {
         return;
       }
 
-      // Récupérer les pseudos de tous les expéditeurs uniques
+      // Optimisation : récupérer tous les pseudos en une seule requête
       const senderIds = Array.from(new Set(data.map(msg => msg.id_sender)));
       
       const { data: usersData } = await supabase
@@ -158,7 +259,7 @@ export default function ChatTestPage() {
         .select('id, pseudo')
         .in('id', senderIds);
 
-      // Créer un mapping ID → pseudo pour performance O(1)
+      // Mapping ID → pseudo pour performance O(1)
       const usersMap: Record<string, string> = {};
       (usersData || []).forEach(user => {
         usersMap[user.id] = user.pseudo;
@@ -185,34 +286,59 @@ export default function ChatTestPage() {
 
   // Écouter les nouveaux messages en temps réel via Supabase Realtime
   const subscribeToMessages = () => {
+    if (subscriptionRef.current) {
+      subscriptionRef.current.unsubscribe();
+    }
+
     const subscription = supabase
-      .channel(`chat-${TEST_GAME_ID}`)
+      .channel(`chat-${TEST_GAME_ID}-${Date.now()}`) // Nom unique pour éviter les conflits
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'chat_messages',
         filter: `game_id=eq.${TEST_GAME_ID}`
       }, async (payload) => {
-        // Récupérer le pseudo de l'expéditeur du nouveau message
-        const { data: senderData } = await supabase
-          .from('user_public')
-          .select('pseudo')
-          .eq('id', payload.new.id_sender)
-          .single();
+        try {
+          // Récupérer le pseudo de l'expéditeur du nouveau message
+          const { data: senderData } = await supabase
+            .from('user_public')
+            .select('pseudo')
+            .eq('id', payload.new.id_sender)
+            .single();
 
-        const newMessage: ChatMessage = {
-          ...payload.new as any,
-          sender: senderData ? { pseudo: senderData.pseudo } : { pseudo: 'Utilisateur Test' }
-        };
+          const newMessage: ChatMessage = {
+            ...payload.new as any,
+            sender: senderData ? { pseudo: senderData.pseudo } : { pseudo: 'Utilisateur Test' }
+          };
 
-        setMessages(prev => [...prev, newMessage]);
+          setMessages(prev => [...prev, newMessage]);
+        } catch (error) {
+          console.error('Erreur lors du traitement du nouveau message:', error);
+        }
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Statut de la souscription:', status);
+        
+        // Mettre à jour l'indicateur de connexion selon le statut
+        if (status === 'SUBSCRIBED') {
+          setConnectionStatus('connected');
+        } else if (status === 'CHANNEL_ERROR') {
+          setConnectionStatus('disconnected');
+        } else if (status === 'TIMED_OUT') {
+          setConnectionStatus('disconnected');
+          // Retry automatique
+          setTimeout(() => {
+            if (document.visibilityState === 'visible') {
+              reconnectRealtime();
+            }
+          }, 2000);
+        }
+      });
 
-    return () => subscription.unsubscribe();
+    subscriptionRef.current = subscription;
   };
 
-  // Envoyer un nouveau message
+  // Envoyer un nouveau message dans le chat
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -241,7 +367,7 @@ export default function ChatTestPage() {
     }
   };
 
-  // Fonction de test pour simuler des messages de différents types d'utilisateurs
+  // Simuler des messages pour tester le chat (dev/demo)
   const simulateMessage = async (type: 'player' | 'spectator') => {
     if (!user?.id) return;
 
@@ -280,7 +406,7 @@ export default function ChatTestPage() {
     }
   };
 
-  // Afficher le badge de rôle selon le type d'utilisateur
+  // Afficher le badge de rôle (Blanc/Noir/Spectateur) pour chaque message
   const getRoleBadge = (senderId: string) => {
     if (!gameInfo) return null;
     
@@ -314,7 +440,18 @@ export default function ChatTestPage() {
       <Header />
       
       <div className="container mx-auto px-4 py-8 max-w-4xl">
-        {/* En-tête de la page */}
+        {/* Indicateur de statut de connexion en temps réel */}
+        {connectionStatus !== 'connected' && (
+          <div className="mb-4 p-3 rounded-lg bg-yellow-900/50 border border-yellow-600/50">
+            <div className="flex items-center space-x-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-400"></div>
+              <span className="text-yellow-200 text-sm">
+                {connectionStatus === 'disconnected' ? 'Connexion perdue... Reconnexion automatique' : 'Reconnexion en cours...'}
+              </span>
+            </div>
+          </div>
+        )}
+
         <div className="mb-6">
           <Link href="/dashboard" className="inline-flex items-center text-slate-400 hover:text-blue-400 transition-colors mb-4">
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -393,7 +530,7 @@ export default function ChatTestPage() {
           </CardHeader>
 
           <CardContent className="flex-1 flex flex-col p-4">
-            {/* Zone d'affichage des messages */}
+            {/* Zone d'affichage des messages avec scroll automatique */}
             <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-2">
               {messages.length === 0 ? (
                 <div className="text-center py-8">
@@ -465,21 +602,6 @@ export default function ChatTestPage() {
             <p className="text-xs text-slate-500 mt-2">
               Limite de 500 caractères • Chat public visible par tous les participants
             </p>
-          </CardContent>
-        </Card>
-
-        {/* Documentation des fonctionnalités */}
-        <Card className="glass-effect border-white/10 mt-6">
-          <CardContent className="p-6">
-            <h3 className="font-semibold text-white mb-3">Fonctionnalités du Chat</h3>
-            <ul className="space-y-2 text-sm text-slate-400">
-              <li>• <strong>Joueurs et Spectateurs</strong> peuvent tous participer au chat</li>
-              <li>• Les <strong>badges</strong> indiquent le rôle : Blanc, Noir, ou Spectateur</li>
-              <li>• Chat <strong>en temps réel</strong> avec synchronisation instantanée</li>
-              <li>• <strong>Historique</strong> des messages sauvegardé dans la base de données</li>
-              <li>• Interface <strong>responsive</strong> et accessible sur tous les appareils</li>
-              <li>• <strong>Modération</strong> automatique (limite de caractères, filtres futurs)</li>
-            </ul>
           </CardContent>
         </Card>
       </div>
