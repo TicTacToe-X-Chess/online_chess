@@ -102,10 +102,21 @@ export default function RoomPage() {
   const chatSubscriptionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
+  // ✅ AJOUT : États pour la synchronisation des mouvements
+  const gameSubscriptionRef = useRef<any>(null);
+  const currentFenRef = useRef<string>('');
+  
   const supabase = createClient();
 
   console.log('🏠 Room Page - Room ID from params:', roomId);
   console.log('📊 Current user:', user?.id);
+
+  // ✅ FONCTION UTILITAIRE : Garantir que l'historique est toujours un tableau valide
+  const ensureGameHistoryArray = (history: any): string[] => {
+    if (!history) return [];
+    if (Array.isArray(history)) return history.filter(move => typeof move === 'string');
+    return [];
+  };
 
   // Récupérer le profil utilisateur
   useEffect(() => {
@@ -145,16 +156,46 @@ export default function RoomPage() {
 
     console.log('🔍 Starting to fetch room data for ID:', roomId);
 
-    // Récupération des infos à l'ouverture de la salle
-    fetchRoom();
-    fetchParticipants();
-    // ✅ AJOUT : Initialiser le chat
-    fetchChatMessages();
-    subscribeToChatMessages();
-    
-    // Actualisation en temps réel
-    const subscription = supabase
-      .channel(`room-${roomId}`)
+    // ✅ CORRECTION : Nettoyer d'abord toutes les subscriptions existantes
+    const cleanup = () => {
+      if (chatSubscriptionRef.current) {
+        console.log('🧹 Cleaning up chat subscription');
+        chatSubscriptionRef.current.unsubscribe();
+        chatSubscriptionRef.current = null;
+      }
+      if (gameSubscriptionRef.current) {
+        console.log('🧹 Cleaning up game subscription');
+        gameSubscriptionRef.current.unsubscribe();
+        gameSubscriptionRef.current = null;
+      }
+    };
+
+    // Nettoyer avant de commencer
+    cleanup();
+
+    const initializeRoom = async () => {
+      try {
+        // Récupération des infos à l'ouverture de la salle
+        await fetchRoom();
+        await fetchParticipants();
+        await fetchChatMessages();
+        
+        // ✅ IMPORTANT : Attendre un peu avant de créer les subscriptions
+        setTimeout(() => {
+          subscribeToChatMessages();
+          subscribeToGameMoves();
+        }, 500);
+        
+      } catch (error) {
+        console.error('Error initializing room:', error);
+      }
+    };
+
+    initializeRoom();
+
+    // ✅ CORRECTION : Subscription room séparée avec un nom unique
+    const roomSubscription = supabase
+      .channel(`room-general-${roomId}-${Date.now()}`) // Nom unique
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
         () => {
@@ -172,24 +213,105 @@ export default function RoomPage() {
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
-      // ✅ AJOUT : Nettoyer le chat
-      if (chatSubscriptionRef.current) {
-        chatSubscriptionRef.current.unsubscribe();
-      }
+      console.log('🧹 Cleaning up all subscriptions on unmount');
+      cleanup();
+      roomSubscription.unsubscribe();
     };
-  }, [roomId, supabase]);
+  }, [roomId]); // ✅ IMPORTANT : Supprimer supabase des dépendances
 
   // Initialiser le jeu quand les deux joueurs sont présents
   useEffect(() => {
-    if (room && room.host_id && room.guest_id && room.status === 'playing' && !gameStarted) {
-      console.log('🎮 Initializing chess game...');
-      setGameStarted(true);
-      setGame(new Chess());
-      setGameHistory([]);
-      setCurrentPlayer('white');
-    }
-  }, [room, gameStarted]);
+    const initializeGame = async () => {
+      if (room && room.host_id && room.guest_id && room.status === 'playing' && !gameStarted) {
+        console.log('🎮 Initializing chess game...');
+        
+        try {
+          // Essayer de charger l'état du jeu depuis la base de données
+          const { data: gameData, error } = await supabase
+            .from('games')
+            .select('*')
+            .eq('id_game', roomId)
+            .maybeSingle(); // ✅ CORRECTION : Utiliser maybeSingle() au lieu de single()
+
+          if (error) {
+            console.error('❌ Error loading game state:', error);
+            // Créer un nouveau jeu en cas d'erreur
+            const newGame = new Chess();
+            setGame(newGame);
+            setGameHistory([]);
+            setCurrentPlayer('white');
+            currentFenRef.current = newGame.fen();
+          } else if (gameData) {
+            // Jeu existant trouvé, charger l'état
+            console.log('📋 Loading existing game state:', gameData);
+            
+            try {
+              const loadedGame = new Chess(gameData.current_fen || undefined);
+              setGame(loadedGame);
+              setGameHistory(ensureGameHistoryArray(gameData.move_history));
+              setCurrentPlayer(loadedGame.turn() === 'w' ? 'white' : 'black');
+              currentFenRef.current = loadedGame.fen();
+              console.log('✅ Game state loaded successfully');
+            } catch (fenError) {
+              console.error('❌ Invalid FEN in database:', gameData.current_fen);
+              // Fallback sur un jeu vide
+              const newGame = new Chess();
+              setGame(newGame);
+              setGameHistory([]);
+              setCurrentPlayer('white');
+              currentFenRef.current = newGame.fen();
+            }
+          } else {
+            // Aucun jeu trouvé, créer un nouveau jeu
+            console.log('� No existing game found, creating new game');
+            const newGame = new Chess();
+            setGame(newGame);
+            setGameHistory([]);
+            setCurrentPlayer('white');
+            currentFenRef.current = newGame.fen();
+            
+            // ✅ AJOUT : Créer l'entrée dans la table games maintenant
+            try {
+              const { error: createError } = await supabase
+                .from('games')
+                .insert({
+                  id_game: roomId,
+                  white_player: room.host_id,
+                  black_player: room.guest_id,
+                  current_fen: newGame.fen(),
+                  move_history: [],
+                  current_turn: 'w',
+                  winner: null,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                });
+
+              if (createError) {
+                console.error('❌ Error creating game entry:', createError);
+              } else {
+                console.log('✅ Game entry created successfully');
+              }
+            } catch (createGameError) {
+              console.error('💥 Error creating game entry:', createGameError);
+            }
+          }
+        } catch (error) {
+          console.error('💥 Error initializing game:', error);
+          // Fallback final
+          const newGame = new Chess();
+          setGame(newGame);
+          setGameHistory([]);
+          setCurrentPlayer('white');
+          currentFenRef.current = newGame.fen();
+        }
+        
+        setGameStarted(true);
+        console.log('🎮 Chess game initialized successfully');
+      }
+    };
+
+    initializeGame();
+  }, [room, gameStarted, roomId, supabase]);
 
   // Récupération des informations de la salle
   const fetchRoom = async () => {
@@ -296,7 +418,7 @@ export default function RoomPage() {
     }
   };
 
-  // Récupération des messages du chat
+  // Récupération des messages du chat - CORRECTION
   const fetchMessages = async () => {
     try {
       console.log('💬 Fetching chat messages...');
@@ -308,9 +430,8 @@ export default function RoomPage() {
           game_id,
           id_sender,
           content,
-          created_at,
-          sender:user_public!chat_messages_id_sender_fkey(pseudo)
-        `)
+          created_at
+        `) // ✅ SUPPRIME la jointure sender:user_public!...
         .eq('game_id', roomId)
         .order('created_at', { ascending: true });
 
@@ -319,16 +440,155 @@ export default function RoomPage() {
         return;
       }
 
-      console.log('💬 Messages loaded:', data);
-      setMessages(data);
+      if (!data || data.length === 0) {
+        setMessages([]);
+        return;
+      }
+
+      // ✅ AJOUT : Récupérer tous les pseudos en une seule requête
+      const senderIds = Array.from(new Set(data.map(msg => msg.id_sender)));
+      
+      const { data: usersData } = await supabase
+        .from('user_public')
+        .select('id, pseudo')
+        .in('id', senderIds);
+
+      // Mapping ID → pseudo
+      const usersMap: Record<string, string> = {};
+      (usersData || []).forEach(user => {
+        usersMap[user.id] = user.pseudo;
+      });
+
+      // ✅ AJOUT : Enrichir les messages avec les pseudos
+      const transformedMessages: ChatMessage[] = data.map((message) => ({
+        id: message.id,
+        game_id: message.game_id,
+        id_sender: message.id_sender,
+        content: message.content,
+        created_at: message.created_at,
+        sender: {
+          pseudo: usersMap[message.id_sender] || 'Utilisateur'
+        }
+      }));
+
+      console.log('💬 Messages loaded:', transformedMessages);
+      setMessages(transformedMessages); // ✅ CORRECTION
+      
+      // Scroll vers le bas après chargement
+      setTimeout(() => scrollToBottom(), 100);
     } catch (error) {
       console.error('💥 Error fetching messages:', error);
     }
   };
 
+  // ✅ AJOUT : Fonction pour synchroniser un mouvement avec la base de données
+  const saveGameMove = async (gameFen: string, moveHistory: string[], currentTurn: 'w' | 'b') => {
+    if (!gameStarted || !room) return;
+
+    try {
+      console.log('💾 Saving game move:', {
+        fen: gameFen,
+        history: moveHistory,
+        turn: currentTurn
+      });
+
+      const { data, error } = await supabase
+        .from('games')
+        .update({
+          current_fen: gameFen,
+          move_history: moveHistory,
+          current_turn: currentTurn,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id_game', roomId)
+        .select();
+
+      if (error) {
+        console.error('❌ Error saving game state:', error);
+        toast.error('Erreur de synchronisation');
+      } else {
+        console.log('✅ Game state saved successfully:', data);
+      }
+    } catch (error) {
+      console.error('💥 Error saving game move:', error);
+    }
+  };
+
+  // ✅ AJOUT : Subscription aux mouvements de jeu
+  const subscribeToGameMoves = () => {
+    if (gameSubscriptionRef.current) {
+      console.log('⚠️ Game subscription already exists, skipping');
+      return;
+    }
+
+    try {
+      const subscription = supabase
+        .channel(`game-moves-${roomId}`)
+        .on('postgres_changes', {
+          event: '*', // ✅ Écouter INSERT et UPDATE
+          schema: 'public',
+          table: 'games',
+          filter: `id_game=eq.${roomId}`
+        }, (payload) => {
+          console.log('🎮 Game change received:', payload);
+          
+          try {
+            const newGameState = payload.new as any;
+            
+            console.log('🔍 New game state:', {
+              fen: newGameState?.current_fen,
+              history: newGameState?.move_history,
+              turn: newGameState?.current_turn
+            });
+            
+            // ✅ CORRECTION : Ne mettre à jour que si l'état a vraiment changé
+            if (newGameState?.current_fen && newGameState.current_fen !== currentFenRef.current) {
+              console.log('🔄 Updating game state from remote');
+              console.log('🔄 Old FEN:', currentFenRef.current);
+              console.log('🔄 New FEN:', newGameState.current_fen);
+              
+              try {
+                const newGame = new Chess(newGameState.current_fen);
+                setGame(newGame);
+                setGameHistory(ensureGameHistoryArray(newGameState.move_history));
+                setCurrentPlayer(newGame.turn() === 'w' ? 'white' : 'black');
+                currentFenRef.current = newGameState.current_fen;
+                
+                console.log('✅ Game state updated successfully');
+                console.log('✅ New turn:', newGame.turn() === 'w' ? 'white' : 'black');
+              } catch (chessError) {
+                console.error('❌ Invalid FEN received:', newGameState.current_fen, chessError);
+              }
+            } else {
+              console.log('🟡 Game state unchanged, skipping update');
+            }
+          } catch (error) {
+            console.error('❌ Error processing game move:', error);
+          }
+        })
+        .subscribe((status) => {
+          console.log('📡 Game subscription status:', status);
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Game subscription active');
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Game subscription error');
+          }
+        });
+
+      gameSubscriptionRef.current = subscription;
+    } catch (error) {
+      console.error('Error creating game subscription:', error);
+    }
+  };
+
   // Fonction pour jouer un coup
   const makeMove = (sourceSquare: string, targetSquare: string) => {
+    console.log('🎯 === MOVE ATTEMPT START ===');
     console.log('🎯 Attempting move:', sourceSquare, '->', targetSquare);
+    console.log('🎯 Game started:', gameStarted);
+    console.log('🎯 Current turn:', game.turn());
+    console.log('🎯 Is host:', isHost);
+    console.log('🎯 Is guest:', isGuest);
     
     if (!gameStarted) {
       console.log('❌ Game not started yet');
@@ -339,6 +599,8 @@ export default function RoomPage() {
     const isPlayerTurn = 
       (game.turn() === 'w' && isHost) || 
       (game.turn() === 'b' && isGuest);
+    
+    console.log('🎯 Is player turn:', isPlayerTurn);
     
     if (!isPlayerTurn) {
       console.log('❌ Not player turn');
@@ -351,7 +613,7 @@ export default function RoomPage() {
       const move = gameCopy.move({
         from: sourceSquare,
         to: targetSquare,
-        promotion: 'q' // Toujours promouvoir en dame pour simplifier
+        promotion: 'q'
       });
 
       if (move === null) {
@@ -361,11 +623,20 @@ export default function RoomPage() {
       }
 
       console.log('✅ Valid move:', move);
+      console.log('🎯 New FEN:', gameCopy.fen());
       
-      // Mettre à jour l'état du jeu
+      // Mettre à jour l'état local
+      const currentHistory = ensureGameHistoryArray(gameHistory);
+      const newHistory = [...currentHistory, move.san];
       setGame(gameCopy);
-      setGameHistory(prev => [...prev, move.san]);
+      setGameHistory(newHistory);
       setCurrentPlayer(gameCopy.turn() === 'w' ? 'white' : 'black');
+      currentFenRef.current = gameCopy.fen();
+
+      console.log('🎯 Updated local state');
+      
+      // ✅ AJOUT : Synchroniser avec la base de données
+      saveGameMove(gameCopy.fen(), newHistory, gameCopy.turn());
 
       // Vérifier la fin de partie
       if (gameCopy.isGameOver()) {
@@ -380,9 +651,7 @@ export default function RoomPage() {
         toast.warning('Échec !');
       }
 
-      // TODO: Synchroniser avec la base de données
-      // saveGameState(gameCopy.fen(), move.san);
-
+      console.log('🎯 === MOVE ATTEMPT END ===');
       return true;
     } catch (error) {
       console.error('💥 Error making move:', error);
@@ -433,7 +702,7 @@ export default function RoomPage() {
     }
   };
 
-  // Rejoindre en tant que joueur
+  // Rejoindre en tant que joueur - MODIFICATION
   const joinAsPlayer = async () => {
     if (!userProfile || !room || room.guest_id || joiningRoom) return;
 
@@ -459,6 +728,9 @@ export default function RoomPage() {
         throw participantError;
       }
 
+      // ✅ MODIFICATION : Ne pas créer l'entrée games ici, cela sera fait lors de l'initialisation du jeu
+      // L'entrée sera créée automatiquement quand le jeu s'initialise
+
       // Mettre à jour la room
       const { error: roomError } = await supabase
         .from('rooms')
@@ -472,7 +744,7 @@ export default function RoomPage() {
         .is('guest_id', null);
 
       if (roomError) {
-        // Rollback
+        // Rollback participant seulement
         await supabase
           .from('room_participants')
           .delete()
@@ -616,46 +888,61 @@ export default function RoomPage() {
   const subscribeToChatMessages = () => {
     console.log('📡 Setting up chat subscription for room:', roomId);
     
+    // ✅ CORRECTION : Vérifier si déjà abonné
     if (chatSubscriptionRef.current) {
-      console.log('🧹 Cleaning up existing subscription');
-      chatSubscriptionRef.current.unsubscribe();
+      console.log('⚠️ Chat subscription already exists, skipping');
+      return;
     }
 
-    const subscription = supabase
-      .channel(`room-chat-${roomId}`) // ✅ Nom de channel stable et unique
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'chat_messages',
-        filter: `game_id=eq.${roomId}` // ✅ Assure-toi que c'est bien game_id
-      }, async (payload) => {
-        console.log('💬 New chat message received:', payload);
-        
-        try {
-          // Récupérer le pseudo de l'expéditeur
-          const { data: senderData } = await supabase
-            .from('user_public')
-            .select('pseudo')
-            .eq('id', payload.new.id_sender)
-            .single();
+    try {
+      const subscription = supabase
+        .channel(`room-chat-${roomId}`) // ✅ Nom stable (sans timestamp)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `game_id=eq.${roomId}`
+        }, async (payload) => {
+          console.log('💬 New chat message received:', payload);
+          
+          try {
+            // Récupérer le pseudo de l'expéditeur
+            const { data: senderData } = await supabase
+              .from('user_public')
+              .select('pseudo')
+              .eq('id', payload.new.id_sender)
+              .single();
 
-          const newMessage: ChatMessage = {
-            ...payload.new as any,
-            sender: senderData ? { pseudo: senderData.pseudo } : { pseudo: 'Utilisateur' }
-          };
+            const newMessage: ChatMessage = {
+              ...payload.new as any,
+              sender: senderData ? { pseudo: senderData.pseudo } : { pseudo: 'Utilisateur' }
+            };
 
-          console.log('💬 Adding message to state:', newMessage);
-          setMessages(prev => [...prev, newMessage]);
-          setTimeout(() => scrollToBottom(), 100);
-        } catch (error) {
-          console.error('Error processing new chat message:', error);
-        }
-      })
-      .subscribe((status) => {
-        console.log('📡 Chat subscription status:', status);
-      });
+            console.log('💬 Adding message to state:', newMessage);
+            setMessages(prev => [...prev, newMessage]);
+            setTimeout(() => scrollToBottom(), 100);
+          } catch (error) {
+            console.error('Error processing new chat message:', error);
+          }
+        })
+        .subscribe((status) => {
+          console.log('📡 Chat subscription status:', status);
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Chat subscription active');
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Chat subscription error');
+            // Retry après un délai
+            setTimeout(() => {
+              chatSubscriptionRef.current = null;
+              subscribeToChatMessages();
+            }, 2000);
+          }
+        });
 
-    chatSubscriptionRef.current = subscription;
+      chatSubscriptionRef.current = subscription;
+    } catch (error) {
+      console.error('Error creating chat subscription:', error);
+    }
   };
 
   const sendChatMessage = async (e: React.FormEvent) => {
@@ -878,7 +1165,7 @@ export default function RoomPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {gameHistory.length === 0 ? (
+                    {!Array.isArray(gameHistory) || gameHistory.length === 0 ? (
                       <p className="text-slate-400">Aucun coup joué pour l'instant.</p>
                     ) : (
                       <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2 text-sm max-h-48 overflow-y-auto">
@@ -1081,7 +1368,7 @@ export default function RoomPage() {
                     {spectators.map((spectator) => (
                       <div key={spectator.id} className="flex items-center space-x-2 text-sm">
                         <Avatar className="h-6 w-6">
-                          <AvatarFallback className="bg-purple-600 text-white text-xs">
+                          <AvatarFallback className={`bg-purple-600 text-white text-xs`}>
                             {spectator.user.pseudo.charAt(0).toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
