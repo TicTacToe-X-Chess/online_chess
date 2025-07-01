@@ -50,7 +50,7 @@ export function useAuth() {
         setUser(session?.user ?? null);
 
         if (event === 'SIGNED_IN' && session?.user) {
-          console.log('User signed in, fetching profile...');
+          console.log('User signed in with ID:', session.user.id);
           
           // Récupérer le profil lors de la connexion
           const { data: profile, error: profileError } = await supabase
@@ -59,10 +59,12 @@ export function useAuth() {
             .eq('id', session.user.id)
             .single();
           
+          console.log('Supabase query result:', { profile, profileError });
+          
           if (profileError) {
             console.error('Error fetching profile:', profileError);
           } else {
-            console.log('Profile fetched:', profile);
+            console.log('Profile fetched successfully:', profile);
             setProfile(profile);
           }
 

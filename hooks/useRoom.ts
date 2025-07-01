@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Room } from '@/types/database';
+import { Room, UserProfile } from '@/types/database';
 import { useAuth } from '@/hooks/useAuth';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -14,15 +14,20 @@ export interface RoomParticipant {
     joined_at: string;
     left_at?: string;
     is_active: boolean;
-    profile: Profile;
+    user: {
+        id: string;
+        email?: string;
+        user_metadata: {
+            pseudo: string;
+            avatar_url?: string;
+        };
+    };
 }
-
-class Profile {}
 
 export interface RoomWithParticipants extends Room {
     participants: RoomParticipant[];
-    host: Profile;
-    guest?: Profile;
+    host: UserProfile;
+    guest?: UserProfile;
 }
 
 export function useRoom(roomId?: string) {
@@ -64,9 +69,10 @@ export function useRoom(roomId?: string) {
     const joinRoom = async (roomId: string, roomCode?: string) => {
         if (!profile) throw new Error('User must be authenticated to join a room');
 
+        // Récupérer les données de la room avec le host depuis auth.users
         const { data: roomData, error: roomError } = await supabase
             .from('rooms')
-            .select('*, host:profiles!rooms_host_id_fkey(*)')
+            .select('*')
             .eq('id', roomId)
             .single();
 
@@ -166,41 +172,75 @@ export function useRoom(roomId?: string) {
         }
     };
 
+    // Fonction utilitaire pour récupérer les données utilisateur depuis auth.users
+    const getUserData = async (userId: string) => {
+        const { data, error } = await supabase.auth.admin.getUserById(userId);
+        if (error || !data?.user) return null;
+
+        return {
+            id: data.user.id,
+            email: data.user.email,
+            user_metadata: data.user.user_metadata || { pseudo: 'Anonymous' }
+        };
+    };
+
     const fetchRoom = async (id: string) => {
         try {
             setLoading(true);
             setError(null);
 
-            const { data, error } = await supabase
+            // Récupérer les données de la salle
+            const { data: roomData, error: roomError } = await supabase
                 .from('rooms')
-                .select(`
-                    *,
-                    host:profiles!rooms_host_id_fkey(*),
-                    guest:profiles!rooms_guest_id_fkey(*)
-                `)
+                .select('*')
                 .eq('id', id)
                 .single();
 
-            if (error) throw error;
+            if (roomError) throw roomError;
 
+            // Récupérer les participants
             const { data: participants, error: participantsError } = await supabase
                 .from('room_participants')
-                .select(`
-                    *,
-                    profile:profiles(*)
-                `)
+                .select('*')
                 .eq('room_id', id)
                 .eq('is_active', true)
                 .order('joined_at', { ascending: true });
 
             if (participantsError) throw participantsError;
 
+            // Récupérer les données des utilisateurs pour les participants
+            const participantsWithUsers: RoomParticipant[] = [];
+
+            for (const participant of participants) {
+                const userData = await getUserData(participant.user_id);
+                if (userData) {
+                    participantsWithUsers.push({
+                        id: participant.id,
+                        room_id: participant.room_id,
+                        user_id: participant.user_id,
+                        role: participant.role,
+                        joined_at: participant.joined_at,
+                        is_active: participant.is_active,
+                        left_at: participant.left_at,
+                        user: userData
+                    });
+                }
+            }
+
+            // Récupérer les données du host
+            const hostData = await getUserData(roomData.host_id);
+
+            // Récupérer les données du guest si présent
+            let guestData = null;
+            if (roomData.guest_id) {
+                guestData = await getUserData(roomData.guest_id);
+            }
+
             const roomWithParticipants: RoomWithParticipants = {
-                ...data,
-                participants: participants.map(p => ({
-                    ...p,
-                    profile: p.profile as Profile,
-                })),
+                ...roomData,
+                participants: participantsWithUsers,
+                host: hostData || { id: roomData.host_id, email: null, pseudo: 'Unknown', created_at: '', last_connection: null, country: null },
+                guest: guestData || undefined
             };
 
             setRoom(roomWithParticipants);
@@ -228,18 +268,14 @@ export function useRoom(roomId?: string) {
                     if (!updatedRoom) return;
 
                     if (updatedRoom.guest_id && !room?.guest) {
-                        const { data: guestProfile } = await supabase
-                            .from('profiles')
-                            .select('*')
-                            .eq('id', updatedRoom.guest_id)
-                            .single();
+                        const guestData = await getUserData(updatedRoom.guest_id);
 
                         setRoom(prev =>
                             prev
                                 ? {
                                     ...prev,
                                     ...updatedRoom,
-                                    guest: guestProfile || prev.guest,
+                                    guest: guestData || prev.guest,
                                 }
                                 : prev
                         );
@@ -260,24 +296,20 @@ export function useRoom(roomId?: string) {
                 async (payload) => {
                     const participantRaw = payload.new;
 
-                    // Récupération manuelle du profil depuis la table profiles
-                    const { data: profileData, error } = await supabase
-                        .from('profiles')
-                        .select('*')
-                        .eq('id', participantRaw.user_id)
-                        .single();
+                    // Récupérer les données de l'utilisateur depuis auth.users
+                    const userData = await getUserData(participantRaw.user_id);
 
-                    if (error || !profileData) return;
+                    if (!userData) return;
 
                     const participant: RoomParticipant = {
-                        ...participantRaw,
-                        profile: profileData,
-                        id: '',
-                        room_id: '',
-                        user_id: '',
-                        role: 'player',
-                        joined_at: '',
-                        is_active: false
+                        id: participantRaw.id,
+                        room_id: participantRaw.room_id,
+                        user_id: participantRaw.user_id,
+                        role: participantRaw.role as 'host' | 'player' | 'spectator',
+                        joined_at: participantRaw.joined_at,
+                        is_active: participantRaw.is_active,
+                        left_at: participantRaw.left_at,
+                       // user: userData
                     };
 
                     setRoom(prev =>
@@ -285,7 +317,6 @@ export function useRoom(roomId?: string) {
                     );
                 }
             )
-
             .on(
                 'postgres_changes',
                 { event: 'UPDATE', schema: 'public', table: 'room_participants', filter: `room_id=eq.${roomId}` },
@@ -293,7 +324,12 @@ export function useRoom(roomId?: string) {
                     setRoom(prev => {
                         if (!prev) return prev;
                         const updatedParticipants = prev.participants.map(p =>
-                            p.id === payload.new.id ? { ...p, ...payload.new } : p
+                            p.id === payload.new.id ? {
+                                ...p,
+                                role: payload.new.role,
+                                is_active: payload.new.is_active,
+                                left_at: payload.new.left_at
+                            } : p
                         );
                         return { ...prev, participants: updatedParticipants };
                     });
