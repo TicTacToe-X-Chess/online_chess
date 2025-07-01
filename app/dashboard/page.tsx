@@ -591,7 +591,7 @@ export default function DashboardPage() {
     };
   };
 
-  if (loading) {
+  if (loading || loadingRooms || !userProfile) {
     return (
       <div className="min-h-screen">
         <Header />
@@ -603,7 +603,7 @@ export default function DashboardPage() {
         </div>
       </div>
     );
-  }
+  } 
 
   if (!user) {
     return (
