@@ -1,42 +1,59 @@
 export interface Database {
   public: {
     Tables: {
-      profiles: {
+      user_public: {
         Row: {
           id: string;
-          username: string;
-          avatar_url?: string;
+          email: string;
+          pseudo: string;
           created_at: string;
-          updated_at: string;
-          games_played: number;
-          games_won: number;
-          rating: number;
-          is_online: boolean;
-          last_seen: string;
+          last_connection: string;
         };
         Insert: {
           id: string;
-          username: string;
-          avatar_url?: string;
+          email: string;
+          pseudo: string;
           created_at?: string;
-          updated_at?: string;
-          games_played?: number;
-          games_won?: number;
-          rating?: number;
-          is_online?: boolean;
-          last_seen?: string;
+          last_connection?: string;
         };
         Update: {
           id?: string;
-          username?: string;
-          avatar_url?: string;
+          email?: string;
+          pseudo?: string;
           created_at?: string;
-          updated_at?: string;
+          last_connection?: string;
+        };
+      };
+      user_ranking: {
+        Row: {
+          id: string;
+          user_id: string;
+          games_played: number;
+          games_won: number;
+          games_lost: number;
+          elo_rating: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
           games_played?: number;
           games_won?: number;
-          rating?: number;
-          is_online?: boolean;
-          last_seen?: string;
+          games_lost?: number;
+          elo_rating?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          games_played?: number;
+          games_won?: number;
+          games_lost?: number;
+          elo_rating?: number;
+          created_at?: string;
+          updated_at?: string;
         };
       };
       rooms: {
@@ -78,6 +95,41 @@ export interface Database {
           updated_at?: string;
           max_spectators?: number;
           time_control?: string;
+        };
+      };
+      room_participants: {
+        Row: {
+          id: string;
+          room_id: string;
+          user_id: string;
+          role: 'host' | 'player' | 'spectator';
+          joined_at: string;
+          left_at?: string;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          room_id: string;
+          user_id: string;
+          role?: 'host' | 'player' | 'spectator';
+          joined_at?: string;
+          left_at?: string;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          room_id?: string;
+          user_id?: string;
+          role?: 'host' | 'player' | 'spectator';
+          joined_at?: string;
+          left_at?: string;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
         };
       };
       games: {
@@ -160,7 +212,9 @@ export interface Database {
   };
 }
 
-export type Profile = Database['public']['Tables']['profiles']['Row'];
+export type UserProfile = Database['public']['Tables']['user_public']['Row'];
+export type UserRanking = Database['public']['Tables']['user_ranking']['Row'];
 export type Room = Database['public']['Tables']['rooms']['Row'];
+export type RoomParticipant = Database['public']['Tables']['room_participants']['Row'];
 export type Game = Database['public']['Tables']['games']['Row'];
 export type Spectator = Database['public']['Tables']['spectators']['Row'];
