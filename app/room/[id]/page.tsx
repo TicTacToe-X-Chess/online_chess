@@ -1231,6 +1231,7 @@ export default function RoomPage() {
             )}
           </div>
 
+          { /* Modale de fin de partie */ }
           {finPartie.open && (
             <div
               className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-70 z-50"
