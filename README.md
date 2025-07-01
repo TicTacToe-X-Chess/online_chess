@@ -55,7 +55,6 @@ online_chess/
 │   ├── auth/                 # Pages d'authentification
 │   │   ├── login/           # Connexion
 │   │   └── register/        # Inscription
-│   ├── chat/                # Chat de test en temps réel
 │   ├── create-room/         # Création de salles
 │   ├── dashboard/           # Tableau de bord utilisateur
 │   ├── leaderboard/         # Classement mondial

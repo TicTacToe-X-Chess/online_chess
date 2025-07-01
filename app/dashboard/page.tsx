@@ -14,6 +14,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Room } from '@/types/database';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // Type pour les rooms avec relations et participants
 interface RoomWithDetails {
@@ -49,6 +50,9 @@ export default function DashboardPage() {
   const [rooms, setRooms] = useState<RoomWithDetails[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [joiningRoom, setJoiningRoom] = useState<string | null>(null);
+  const [currentTab, setCurrentTab] = useState<string>('all');
+  const [roomsPerPage] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
   const supabase = createClient();
 
   // Récupérer le profil utilisateur
@@ -85,7 +89,7 @@ export default function DashboardPage() {
     try {
       console.log('🔄 Fetching rooms...');
       
-      // Requête pour récupérer les rooms avec les relations
+      // Modifier la requête pour inclure les statuts "waiting" ET "playing"
       const { data: roomsData, error } = await supabase
         .from('rooms')
         .select(`
@@ -103,10 +107,10 @@ export default function DashboardPage() {
           host:user_public!rooms_host_id_fkey(pseudo),
           guest:user_public!rooms_guest_id_fkey(pseudo)
         `)
-        .eq('status', 'waiting')
+        .in('status', ['waiting', 'playing']) 
         .eq('is_private', false)
-        .order('created_at', { ascending: false })
-        .limit(10);
+        .order('created_at', { ascending: false });
+        // Suppression de .limit(10)
 
       if (error) {
         console.error('❌ Supabase rooms error:', error);
@@ -507,7 +511,34 @@ export default function DashboardPage() {
     }
   };
 
-  // ... (gardez le reste du code identique)
+  // Filtrer les rooms selon l'onglet sélectionné
+  const getFilteredRooms = () => {
+    switch (currentTab) {
+      case 'available':
+        return rooms.filter(room => room.can_join_as_player);
+      case 'spectatable':
+        return rooms.filter(room => room.can_join_as_spectator && !room.can_join_as_player);
+      case 'playing':  // Nouveau filtre
+        return rooms.filter(room => room.status === 'playing');
+      case 'full':
+        return rooms.filter(room => !room.can_join_as_player && !room.can_join_as_spectator);
+      case 'my-rooms':
+        return rooms.filter(room => room.host_id === userProfile?.id || room.user_role);
+      default:
+        return rooms;
+    }
+  };
+
+  // Pagination
+  const filteredRooms = getFilteredRooms();
+  const totalPages = Math.ceil(filteredRooms.length / roomsPerPage);
+  const startIndex = (currentPage - 1) * roomsPerPage;
+  const paginatedRooms = filteredRooms.slice(startIndex, startIndex + roomsPerPage);
+
+  // Reset page when changing tabs
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [currentTab]);
 
   const getTimeControlBadgeColor = (timeControl: string) => {
     const time = parseInt(timeControl.split('+')[0]);
@@ -568,6 +599,14 @@ export default function DashboardPage() {
   };
 
   const getRoomStatusInfo = (room: RoomWithDetails) => {
+    if (room.status === 'playing') {
+      return {
+        color: 'bg-blue-600/20 text-blue-400 border-blue-400/50',
+        text: 'En cours',
+        icon: <Play className="h-3 w-3" />
+      };
+    }
+    
     if (room.guest_id) {
       return {
         color: 'bg-orange-600/20 text-orange-400 border-orange-400/50',
@@ -765,20 +804,21 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* Active Rooms */}
+        {/* Active Rooms with Tabs */}
         <Card className="glass-effect border-white/10">
           <CardHeader>
             <CardTitle className="flex items-center space-x-2 text-white">
               <Users className="h-5 w-5 text-blue-400" />
               <span>Salles Disponibles</span>
               <Badge variant="outline" className="ml-2 border-blue-400/50 text-blue-400">
-                {rooms.length} {rooms.length > 1 ? 'salles' : 'salle'}
+                {filteredRooms.length} {filteredRooms.length > 1 ? 'salles' : 'salle'}
               </Badge>
             </CardTitle>
             <CardDescription className="text-slate-400">
               Rejoignez une partie en attente de joueurs ou regardez en spectateur
             </CardDescription>
           </CardHeader>
+          
           <CardContent>
             {loadingRooms ? (
               <div className="text-center py-8">
@@ -801,163 +841,244 @@ export default function DashboardPage() {
                 </Link>
               </div>
             ) : (
-              <div className="space-y-4">
-                {rooms.map((room) => {
-                  const isUserHost = room.host_id === userProfile?.id;
-                  const hasUserRole = !!room.user_role;
-                  const statusInfo = getRoomStatusInfo(room);
-                  const isJoining = joiningRoom === room.id;
-                  
-                  return (
-                    <div
-                      key={room.id}
-                      className="flex items-center justify-between p-4 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-200 group"
-                    >
-                      <div className="flex items-center space-x-4 flex-1">
-                        <Avatar className="h-12 w-12 ring-2 ring-white/10">
-                          <AvatarFallback className="bg-gradient-to-br from-blue-600 to-purple-600 text-white font-semibold">
-                            {room.host?.pseudo?.charAt(0).toUpperCase() || 'U'}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center space-x-2 mb-1">
-                            <h3 className="font-semibold text-white text-lg truncate">{room.name}</h3>
-                            {hasUserRole && getRoleIcon(room.user_role)}
-                            {room.is_private ? (
-                              <Lock className="h-4 w-4 text-purple-400 flex-shrink-0" />
-                            ) : (
-                              <Globe className="h-4 w-4 text-green-400 flex-shrink-0" />
-                            )}
-                          </div>
-                          <div className="flex items-center space-x-3 text-sm flex-wrap gap-1">
-                            <span className="flex items-center text-slate-400">
-                              <Crown className="h-3 w-3 mr-1 text-yellow-400 flex-shrink-0" />
-                              <span className="text-white font-medium truncate max-w-[100px]">
-                                {room.host?.pseudo || 'Inconnu'}
-                              </span>
-                              {isUserHost && <span className="text-blue-400 ml-1">(Vous)</span>}
-                            </span>
-                            <Badge variant="outline" className={`${getTimeControlBadgeColor(room.time_control)} text-xs flex-shrink-0`}>
-                              <Clock className="h-3 w-3 mr-1" />
-                              {room.time_control} • {getTimeControlLabel(room.time_control)}
-                            </Badge>
-                            <span className="flex items-center text-slate-500 text-xs">
-                              <Eye className="h-3 w-3 mr-1 flex-shrink-0" />
-                              {room.spectators_count}/{room.max_spectators} spectateurs
-                            </span>
-                            <span className="text-xs text-slate-500 flex-shrink-0">
-                              {formatTimeAgo(room.created_at)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center space-x-3 flex-shrink-0">
-                        <div className="text-center">
-                          <Badge variant="outline" className={`${statusInfo.color} mb-1 text-xs flex items-center space-x-1`}>
-                            {statusInfo.icon}
-                            <span>{statusInfo.text}</span>
-                          </Badge>
-                          <div className="text-xs text-slate-500">
-                            {room.participants_count}/{room.max_spectators + 2}
-                          </div>
-                        </div>
-                        
-                        <div className="flex flex-col space-y-2">
-                          {/* Boutons pour utilisateur non-participant */}
-                          {!hasUserRole && !isUserHost && (
-                            <>
-                              {room.can_join_as_player && (
-                                <Button
-                                  size="sm"
-                                  onClick={() => joinRoom(room.id)}
-                                  className="chess-gradient hover:opacity-90 min-w-[100px] text-xs"
-                                  disabled={isJoining}
-                                >
-                                  {isJoining ? (
-                                    <div className="flex items-center">
-                                      <div className="animate-spin rounded-full h-3 w-3 border-b border-white mr-2"></div>
-                                      Rejoindre...
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <Play className="mr-1 h-3 w-3" />
-                                      Rejoindre
-                                    </>
-                                  )}
-                                </Button>
-                              )}
-                              
-                              {room.can_join_as_spectator && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => joinAsSpectator(room.id)}
-                                  className="border-white/20 hover:bg-white/10 min-w-[100px] text-xs"
-                                  disabled={isJoining}
-                                >
-                                  {isJoining ? (
-                                    <div className="flex items-center">
-                                      <div className="animate-spin rounded-full h-3 w-3 border-b border-white mr-2"></div>
-                                      Regarder...
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <Eye className="mr-1 h-3 w-3" />
-                                      Regarder
-                                    </>
-                                  )}
-                                </Button>
-                              )}
+              <Tabs value={currentTab} onValueChange={setCurrentTab} className="w-full">
+                <TabsList className="grid w-full grid-cols-6 bg-white/5 border border-white/10">
+                  <TabsTrigger value="all" className="text-white data-[state=active]:bg-blue-600 data-[state=active]:text-white">
+                    Toutes ({rooms.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="available" className="text-white data-[state=active]:bg-green-600 data-[state=active]:text-white">
+                    Disponibles ({rooms.filter(r => r.can_join_as_player).length})
+                  </TabsTrigger>
+                  <TabsTrigger value="playing" className="text-white data-[state=active]:bg-blue-500 data-[state=active]:text-white">
+                    En Cours ({rooms.filter(r => r.status === 'playing').length})
+                  </TabsTrigger>
+                  <TabsTrigger value="spectatable" className="text-white data-[state=active]:bg-purple-600 data-[state=active]:text-white">
+                    Spectateurs ({rooms.filter(r => r.can_join_as_spectator && !r.can_join_as_player).length})
+                  </TabsTrigger>
+                  <TabsTrigger value="full" className="text-white data-[state=active]:bg-orange-600 data-[state=active]:text-white">
+                    Pleines ({rooms.filter(r => !r.can_join_as_player && !r.can_join_as_spectator).length})
+                  </TabsTrigger>
+                  <TabsTrigger value="my-rooms" className="text-white data-[state=active]:bg-yellow-600 data-[state=active]:text-white">
+                    Mes Salles ({rooms.filter(r => r.host_id === userProfile?.id || r.user_role).length})
+                  </TabsTrigger>
+                </TabsList>
 
-                              {!room.can_join_as_player && !room.can_join_as_spectator && (
-                                <div className="text-center py-2">
-                                  <span className="text-xs text-slate-500">Salle pleine</span>
-                                </div>
-                              )}
-                            </>
-                          )}
-
-                          {/* Bouton pour l'hôte */}
-                          {isUserHost && (
-                            <Link href={`/room/${room.id}`}>
-                              <Button
-                                size="sm"
-                                className="chess-gradient hover:opacity-90 min-w-[100px] text-xs"
-                              >
-                                <Crown className="mr-1 h-3 w-3" />
-                                Ma Salle
-                              </Button>
-                            </Link>
-                          )}
-
-                          {/* Bouton pour un participant existant */}
-                          {hasUserRole && !isUserHost && (
-                            <Link href={`/room/${room.id}`}>
-                              <Button
-                                size="sm"
-                                className="chess-gradient hover:opacity-90 min-w-[100px] text-xs"
-                              >
-                                {room.user_role === 'spectator' ? (
-                                  <>
-                                    <Eye className="mr-1 h-3 w-3" />
-                                    Regarder
-                                  </>
-                                ) : (
-                                  <>
-                                    <Play className="mr-1 h-3 w-3" />
-                                    Jouer
-                                  </>
-                                )}
-                              </Button>
-                            </Link>
-                          )}
-                        </div>
-                      </div>
+                <TabsContent value={currentTab} className="mt-6">
+                  {filteredRooms.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-slate-400">Aucune salle dans cette catégorie</p>
                     </div>
-                  );
-                })}
-              </div>
+                  ) : (
+                    <>
+                      <div className="space-y-4">
+                        {paginatedRooms.map((room) => {
+                          const isUserHost = room.host_id === userProfile?.id;
+                          const hasUserRole = !!room.user_role;
+                          const statusInfo = getRoomStatusInfo(room);
+                          const isJoining = joiningRoom === room.id;
+                          
+                          return (
+                            <div
+                              key={room.id}
+                              className="flex items-center justify-between p-4 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-200 group"
+                            >
+                              <div className="flex items-center space-x-4 flex-1">
+                                <Avatar className="h-12 w-12 ring-2 ring-white/10">
+                                  <AvatarFallback className="bg-gradient-to-br from-blue-600 to-purple-600 text-white font-semibold">
+                                    {room.host?.pseudo?.charAt(0).toUpperCase() || 'U'}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center space-x-2 mb-1">
+                                    <h3 className="font-semibold text-white text-lg truncate">{room.name}</h3>
+                                    {hasUserRole && getRoleIcon(room.user_role)}
+                                    {room.is_private ? (
+                                      <Lock className="h-4 w-4 text-purple-400 flex-shrink-0" />
+                                    ) : (
+                                      <Globe className="h-4 w-4 text-green-400 flex-shrink-0" />
+                                    )}
+                                  </div>
+                                  <div className="flex items-center space-x-3 text-sm flex-wrap gap-1">
+                                    <span className="flex items-center text-slate-400">
+                                      <Crown className="h-3 w-3 mr-1 text-yellow-400 flex-shrink-0" />
+                                      <span className="text-white font-medium truncate max-w-[100px]">
+                                        {room.host?.pseudo || 'Inconnu'}
+                                      </span>
+                                      {isUserHost && <span className="text-blue-400 ml-1">(Vous)</span>}
+                                    </span>
+                                    <Badge variant="outline" className={`${getTimeControlBadgeColor(room.time_control)} text-xs flex-shrink-0`}>
+                                      <Clock className="h-3 w-3 mr-1" />
+                                      {room.time_control} • {getTimeControlLabel(room.time_control)}
+                                    </Badge>
+                                    <span className="flex items-center text-slate-500 text-xs">
+                                      <Eye className="h-3 w-3 mr-1 flex-shrink-0" />
+                                      {room.spectators_count}/{room.max_spectators} spectateurs
+                                    </span>
+                                    <span className="text-xs text-slate-500 flex-shrink-0">
+                                      {formatTimeAgo(room.created_at)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center space-x-3 flex-shrink-0">
+                                <div className="text-center">
+                                  <Badge variant="outline" className={`${statusInfo.color} mb-1 text-xs flex items-center space-x-1`}>
+                                    {statusInfo.icon}
+                                    <span>{statusInfo.text}</span>
+                                  </Badge>
+                                  <div className="text-xs text-slate-500">
+                                    {room.participants_count}/{room.max_spectators + 2}
+                                  </div>
+                                </div>
+                                
+                                <div className="flex flex-col space-y-2">
+                                  {/* Boutons pour utilisateur non-participant */}
+                                  {!hasUserRole && !isUserHost && (
+                                    <>
+                                      {room.can_join_as_player && (
+                                        <Button
+                                          size="sm"
+                                          onClick={() => joinRoom(room.id)}
+                                          className="chess-gradient hover:opacity-90 min-w-[100px] text-xs"
+                                          disabled={isJoining}
+                                        >
+                                          {isJoining ? (
+                                            <div className="flex items-center">
+                                              <div className="animate-spin rounded-full h-3 w-3 border-b border-white mr-2"></div>
+                                              Rejoindre...
+                                            </div>
+                                          ) : (
+                                            <>
+                                              <Play className="mr-1 h-3 w-3" />
+                                              Rejoindre
+                                            </>
+                                          )}
+                                        </Button>
+                                      )}
+                                      
+                                      {room.can_join_as_spectator && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => joinAsSpectator(room.id)}
+                                          className="border-white/20 hover:bg-white/10 min-w-[100px] text-xs"
+                                          disabled={isJoining}
+                                        >
+                                          {isJoining ? (
+                                            <div className="flex items-center">
+                                              <div className="animate-spin rounded-full h-3 w-3 border-b border-white mr-2"></div>
+                                              Regarder...
+                                            </div>
+                                          ) : (
+                                            <>
+                                              <Eye className="mr-1 h-3 w-3" />
+                                              Regarder
+                                            </>
+                                          )}
+                                        </Button>
+                                      )}
+
+                                      {!room.can_join_as_player && !room.can_join_as_spectator && (
+                                        <div className="text-center py-2">
+                                          <span className="text-xs text-slate-500">Salle pleine</span>
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
+
+                                  {/* Bouton pour l'hôte */}
+                                  {isUserHost && (
+                                    <Link href={`/room/${room.id}`}>
+                                      <Button
+                                        size="sm"
+                                        className="chess-gradient hover:opacity-90 min-w-[100px] text-xs"
+                                      >
+                                        <Crown className="mr-1 h-3 w-3" />
+                                        Ma Salle
+                                      </Button>
+                                    </Link>
+                                  )}
+
+                                  {/* Bouton pour un participant existant */}
+                                  {hasUserRole && !isUserHost && (
+                                    <Link href={`/room/${room.id}`}>
+                                      <Button
+                                        size="sm"
+                                        className="chess-gradient hover:opacity-90 min-w-[100px] text-xs"
+                                      >
+                                        {room.user_role === 'spectator' ? (
+                                          <>
+                                            <Eye className="mr-1 h-3 w-3" />
+                                            Regarder
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Play className="mr-1 h-3 w-3" />
+                                            Jouer
+                                          </>
+                                        )}
+                                      </Button>
+                                    </Link>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Pagination */}
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-center space-x-2 mt-6">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                            disabled={currentPage === 1}
+                            className="border-white/20 hover:bg-white/10"
+                          >
+                            Précédent
+                          </Button>
+                          
+                          <div className="flex items-center space-x-1">
+                            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                              <Button
+                                key={page}
+                                variant={currentPage === page ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => setCurrentPage(page)}
+                                className={currentPage === page 
+                                  ? "chess-gradient" 
+                                  : "border-white/20 hover:bg-white/10"
+                                }
+                              >
+                                {page}
+                              </Button>
+                            ))}
+                          </div>
+
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                            disabled={currentPage === totalPages}
+                            className="border-white/20 hover:bg-white/10"
+                          >
+                            Suivant
+                          </Button>
+                        </div>
+                      )}
+
+                      <div className="text-center mt-4">
+                        <p className="text-sm text-slate-500">
+                          Affichage de {startIndex + 1} à {Math.min(startIndex + roomsPerPage, filteredRooms.length)} sur {filteredRooms.length} salles
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </TabsContent>
+              </Tabs>
             )}
           </CardContent>
         </Card>
