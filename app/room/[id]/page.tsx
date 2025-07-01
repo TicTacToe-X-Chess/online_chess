@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Users, Eye, Clock, Copy, Share2, Crown, Play } from 'lucide-react';
+import { ArrowLeft, Users, Eye, Clock, Copy, Share2, Crown, Play, Send, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Chess } from 'chess.js';
+import { Input } from '@/components/ui/input';
 
 // Import dynamique pour éviter les erreurs SSR
 const Chessboard = dynamic(() => import('react-chessboard').then(mod => mod.Chessboard), {
@@ -66,6 +67,17 @@ interface RoomData {
   guest?: SimpleUserData;
 }
 
+interface ChatMessage {
+  id: string;
+  game_id: string;
+  id_sender: string;
+  content: string;
+  created_at: string;
+  sender: {
+    pseudo: string;
+  } | null;
+}
+
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
@@ -82,6 +94,13 @@ export default function RoomPage() {
   const [gameHistory, setGameHistory] = useState<string[]>([]);
   const [currentPlayer, setCurrentPlayer] = useState<'white' | 'black'>('white');
   const [gameStarted, setGameStarted] = useState(false);
+  
+  // ✅ AJOUT : États du chat
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const chatSubscriptionRef = useRef<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   
   const supabase = createClient();
 
@@ -129,6 +148,9 @@ export default function RoomPage() {
     // Récupération des infos à l'ouverture de la salle
     fetchRoom();
     fetchParticipants();
+    // ✅ AJOUT : Initialiser le chat
+    fetchChatMessages();
+    subscribeToChatMessages();
     
     // Actualisation en temps réel
     const subscription = supabase
@@ -151,6 +173,10 @@ export default function RoomPage() {
 
     return () => {
       subscription.unsubscribe();
+      // ✅ AJOUT : Nettoyer le chat
+      if (chatSubscriptionRef.current) {
+        chatSubscriptionRef.current.unsubscribe();
+      }
     };
   }, [roomId, supabase]);
 
@@ -267,6 +293,36 @@ export default function RoomPage() {
       setParticipants(participantsData);
     } catch (error) {
       console.error('💥 Error fetching participants:', error);
+    }
+  };
+
+  // Récupération des messages du chat
+  const fetchMessages = async () => {
+    try {
+      console.log('💬 Fetching chat messages...');
+      
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select(`
+          id,
+          game_id,
+          id_sender,
+          content,
+          created_at,
+          sender:user_public!chat_messages_id_sender_fkey(pseudo)
+        `)
+        .eq('game_id', roomId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('❌ Error fetching messages:', error);
+        return;
+      }
+
+      console.log('💬 Messages loaded:', data);
+      setMessages(data);
+    } catch (error) {
+      console.error('💥 Error fetching messages:', error);
     }
   };
 
@@ -470,6 +526,178 @@ export default function RoomPage() {
     const url = window.location.href;
     navigator.clipboard.writeText(url);
     toast.success('Lien de la salle copié !');
+  };
+
+  // Envoyer un message dans le chat
+  const sendMessage = async (content: string) => {
+    if (!userProfile || !roomId) return;
+
+    try {
+      const { error } = await supabase
+        .from('chat_messages')
+        .insert({
+          game_id: roomId,
+          id_sender: userProfile.id,
+          content
+        });
+
+      if (error) {
+        console.error('❌ Error sending message:', error);
+        toast.error('Erreur lors de l\'envoi du message');
+        return;
+      }
+
+      toast.success('Message envoyé');
+      setNewMessage('');
+      fetchMessages();
+    } catch (error) {
+      console.error('💥 Error sending message:', error);
+      toast.error('Erreur lors de l\'envoi du message');
+    }
+  };
+
+  // ✅ AJOUT : Fonctions du chat
+  const fetchChatMessages = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select(`
+          id,
+          game_id,
+          id_sender,
+          content,
+          created_at
+        `)
+        .eq('game_id', roomId) // Utiliser roomId comme game_id
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        setMessages([]);
+        return;
+      }
+
+      // Récupérer tous les pseudos en une seule requête
+      const senderIds = Array.from(new Set(data.map(msg => msg.id_sender)));
+      
+      const { data: usersData } = await supabase
+        .from('user_public')
+        .select('id, pseudo')
+        .in('id', senderIds);
+
+      // Mapping ID → pseudo
+      const usersMap: Record<string, string> = {};
+      (usersData || []).forEach(user => {
+        usersMap[user.id] = user.pseudo;
+      });
+
+      // Enrichir les messages avec les pseudos
+      const transformedMessages: ChatMessage[] = data.map((message) => ({
+        id: message.id,
+        game_id: message.game_id,
+        id_sender: message.id_sender,
+        content: message.content,
+        created_at: message.created_at,
+        sender: {
+          pseudo: usersMap[message.id_sender] || 'Utilisateur'
+        }
+      }));
+
+      setMessages(transformedMessages);
+      
+      // Scroll vers le bas après chargement
+      setTimeout(() => scrollToBottom(), 100);
+    } catch (error) {
+      console.error('Error fetching chat messages:', error);
+    }
+  };
+
+  const subscribeToChatMessages = () => {
+    console.log('📡 Setting up chat subscription for room:', roomId);
+    
+    if (chatSubscriptionRef.current) {
+      console.log('🧹 Cleaning up existing subscription');
+      chatSubscriptionRef.current.unsubscribe();
+    }
+
+    const subscription = supabase
+      .channel(`room-chat-${roomId}`) // ✅ Nom de channel stable et unique
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'chat_messages',
+        filter: `game_id=eq.${roomId}` // ✅ Assure-toi que c'est bien game_id
+      }, async (payload) => {
+        console.log('💬 New chat message received:', payload);
+        
+        try {
+          // Récupérer le pseudo de l'expéditeur
+          const { data: senderData } = await supabase
+            .from('user_public')
+            .select('pseudo')
+            .eq('id', payload.new.id_sender)
+            .single();
+
+          const newMessage: ChatMessage = {
+            ...payload.new as any,
+            sender: senderData ? { pseudo: senderData.pseudo } : { pseudo: 'Utilisateur' }
+          };
+
+          console.log('💬 Adding message to state:', newMessage);
+          setMessages(prev => [...prev, newMessage]);
+          setTimeout(() => scrollToBottom(), 100);
+        } catch (error) {
+          console.error('Error processing new chat message:', error);
+        }
+      })
+      .subscribe((status) => {
+        console.log('📡 Chat subscription status:', status);
+      });
+
+    chatSubscriptionRef.current = subscription;
+  };
+
+  const sendChatMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!newMessage.trim() || !userProfile) return;
+
+    setIsSending(true);
+
+    try {
+      const { error } = await supabase
+        .from('chat_messages')
+        .insert({
+          game_id: roomId, // Utiliser roomId comme game_id
+          id_sender: userProfile.id,
+          content: newMessage.trim(),
+          created_at: new Date().toISOString()
+        });
+
+      if (error) throw error;
+
+      setNewMessage('');
+    } catch (error) {
+      console.error('Error sending chat message:', error);
+      toast.error('Erreur lors de l\'envoi du message');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const getRoleBadge = (senderId: string) => {
+    if (senderId === room?.host_id) {
+      return <Badge variant="outline" className="text-xs border-yellow-400/50 text-yellow-400">Hôte</Badge>;
+    }
+    if (senderId === room?.guest_id) {
+      return <Badge variant="outline" className="text-xs border-blue-400/50 text-blue-400">Joueur</Badge>;
+    }
+    return <Badge variant="outline" className="text-xs border-purple-400/50 text-purple-400">Spectateur</Badge>;
   };
 
   // États et vérifications
@@ -905,6 +1133,115 @@ export default function RoomPage() {
               </CardContent>
             </Card>
           </div>
+        </div>
+
+        {/* Chat en temps réel */}
+        <div className="mt-8">
+          <Card className="glass-effect border-white/10">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <MessageCircle className="h-5 w-5 text-blue-400" />
+                  <span>Chat de la Partie</span>
+                </div>
+                <Badge variant="outline" className="border-blue-400/50 text-blue-400">
+                  {messages.length} message{messages.length > 1 ? 's' : ''}
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4">
+              {/* Zone d'affichage des messages */}
+              <div className="h-48 overflow-y-auto space-y-3 mb-4 pr-2 border rounded-lg bg-white/5 p-3">
+                {messages.length === 0 ? (
+                  <div className="text-center py-8">
+                    <MessageCircle className="h-8 w-8 text-slate-600 mx-auto mb-2" />
+                    <p className="text-slate-400 text-sm">Aucun message pour le moment</p>
+                    <p className="text-slate-500 text-xs">Soyez le premier à écrire !</p>
+                  </div>
+                ) : (
+                  messages.map((message) => {
+                    const isMyMessage = message.id_sender === userProfile?.id;
+                    
+                    return (
+                      <div
+                        key={message.id}
+                        className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div className={`flex items-start space-x-2 max-w-[80%] ${isMyMessage ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                          <Avatar className="h-6 w-6 flex-shrink-0">
+                            <AvatarFallback className={`text-xs ${isMyMessage ? 'bg-blue-600 text-white' : 'bg-slate-600 text-white'}`}>
+                              {message.sender?.pseudo?.charAt(0).toUpperCase() || 'U'}
+                            </AvatarFallback>
+                          </Avatar>
+                          
+                          <div className={`rounded-lg p-2 break-words ${isMyMessage ? 'bg-blue-600 text-white' : 'bg-white/10 text-white'}`}>
+                            <div className="flex items-center space-x-1 mb-1">
+                              <p className="text-xs font-medium">
+                                {message.sender?.pseudo || 'Utilisateur'}
+                              </p>
+                              {getRoleBadge(message.id_sender)}
+                            </div>
+                            <p className="text-sm break-words">
+                              {message.content}
+                            </p>
+                            <p className={`text-xs mt-1 ${isMyMessage ? 'text-blue-200' : 'text-slate-400'}`}>
+                              {new Date(message.created_at).toLocaleTimeString('fr-FR', {
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Formulaire d'envoi de message */}
+              {userProfile && userParticipant && (
+                <form onSubmit={sendChatMessage} className="flex space-x-2">
+                  <Input
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    placeholder={`Écrivez votre message...`}
+                    className="flex-1 bg-white/10 border-white/20 text-white placeholder:text-slate-400 text-sm"
+                    disabled={isSending}
+                    maxLength={500}
+                  />
+                  <Button
+                    type="submit"
+                    disabled={isSending || !newMessage.trim()}
+                    size="sm"
+                    className="chess-gradient hover:opacity-90"
+                  >
+                    {isSending ? (
+                      <div className="animate-spin rounded-full h-3 w-3 border-b border-white"></div>
+                    ) : (
+                      <Send className="h-3 w-3" />
+                    )}
+                  </Button>
+                </form>
+              )}
+              
+              {!userProfile && (
+                <div className="text-center py-2">
+                  <p className="text-xs text-slate-400">
+                    Connectez-vous pour participer au chat
+                  </p>
+                </div>
+              )}
+
+              {userProfile && !userParticipant && (
+                <div className="text-center py-2">
+                  <p className="text-xs text-slate-400">
+                    Rejoignez la partie pour participer au chat
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
