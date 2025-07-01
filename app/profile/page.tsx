@@ -232,7 +232,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Détails des performances */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 gap-8">
           {/* Statistiques détaillées */}
           <Card className="glass-effect border-white/10">
             <CardHeader>
@@ -291,89 +291,7 @@ export default function ProfilePage() {
               </div>
             </CardContent>
           </Card>
-
-          {/* Progression et niveau */}
-          <Card className="glass-effect border-white/10">
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2 text-white">
-                <TrendingUp className="h-5 w-5 text-green-400" />
-                <span>Niveau & Progression</span>
-              </CardTitle>
-              <CardDescription className="text-slate-400">
-                Votre niveau actuel et catégorie
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Niveau actuel */}
-              <div className="text-center p-6 rounded-lg bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-white/10">
-                <div className={`inline-flex items-center space-x-2 px-4 py-2 rounded-full ${category.bg} mb-4`}>
-                  <Trophy className="h-5 w-5" />
-                  <span className={`font-bold ${category.color}`}>{category.name}</span>
-                </div>
-                <div className="text-3xl font-bold text-white mb-2">{profile.stats.elo_rating}</div>
-                <div className="text-slate-300">Rating ELO actuel</div>
-              </div>
-
-              {/* Objectifs */}
-              <div className="space-y-4">
-                <h4 className="font-semibold text-white">Prochains objectifs</h4>
-                {profile.stats.elo_rating < 1400 && (
-                  <div className="p-3 rounded-lg bg-white/5 border border-yellow-400/30">
-                    <div className="text-yellow-400 font-medium">🎯 Niveau Intermédiaire</div>
-                    <div className="text-sm text-slate-400">
-                      Plus que {1400 - profile.stats.elo_rating} points pour atteindre 1400 ELO
-                    </div>
-                  </div>
-                )}
-                {profile.stats.elo_rating >= 1400 && profile.stats.elo_rating < 1600 && (
-                  <div className="p-3 rounded-lg bg-white/5 border border-green-400/30">
-                    <div className="text-green-400 font-medium">🎯 Niveau Avancé</div>
-                    <div className="text-sm text-slate-400">
-                      Plus que {1600 - profile.stats.elo_rating} points pour atteindre 1600 ELO
-                    </div>
-                  </div>
-                )}
-                {profile.stats.elo_rating >= 1600 && profile.stats.elo_rating < 1800 && (
-                  <div className="p-3 rounded-lg bg-white/5 border border-blue-400/30">
-                    <div className="text-blue-400 font-medium">🎯 Niveau Expert</div>
-                    <div className="text-sm text-slate-400">
-                      Plus que {1800 - profile.stats.elo_rating} points pour atteindre 1800 ELO
-                    </div>
-                  </div>
-                )}
-                {profile.stats.elo_rating >= 1800 && profile.stats.elo_rating < 2000 && (
-                  <div className="p-3 rounded-lg bg-white/5 border border-purple-400/30">
-                    <div className="text-purple-400 font-medium">🎯 Niveau Maître</div>
-                    <div className="text-sm text-slate-400">
-                      Plus que {2000 - profile.stats.elo_rating} points pour atteindre 2000 ELO
-                    </div>
-                  </div>
-                )}
-                {profile.stats.elo_rating >= 2000 && (
-                  <div className="p-3 rounded-lg bg-white/5 border border-purple-400/30">
-                    <div className="text-purple-400 font-medium">👑 Niveau Maître atteint !</div>
-                    <div className="text-sm text-slate-400">
-                      Félicitations, vous avez atteint le niveau maître !
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Conseils */}
-              <div className="p-4 rounded-lg bg-white/5 border border-white/10">
-                <h4 className="font-semibold text-white mb-2">💡 Conseils pour progresser</h4>
-                <ul className="text-sm text-slate-400 space-y-1">
-                  <li>• Jouez régulièrement pour maintenir votre niveau</li>
-                  <li>• Analysez vos parties perdues pour éviter les erreurs</li>
-                  <li>• Variez les adversaires et les styles de jeu</li>
-                  {profile.winRate < 50 && <li>• Concentrez-vous sur la défense et la tactique</li>}
-                  {profile.stats.games_played < 10 && <li>• Jouez plus de parties pour stabiliser votre ELO</li>}
-                </ul>
-              </div>
-            </CardContent>
-          </Card>
         </div>
-
         {/* Actions rapides */}
         <div className="mt-8 text-center">
           <div className="flex justify-center">

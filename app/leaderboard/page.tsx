@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Header } from '@/components/header';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import Link from 'next/link';
 
@@ -47,6 +47,9 @@ export default function LeaderboardPage() {
     averageRating: 0,
     totalGames: 0,
   });
+
+  // ✅ Créer le client dans le composant
+  const supabase = createClient();
 
   useEffect(() => {
     fetchLeaderboard();

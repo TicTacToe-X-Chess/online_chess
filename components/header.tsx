@@ -16,7 +16,7 @@ import { useUserRanking } from '@/hooks/useUserRanking';
 import Link from 'next/link';
 
 export function Header() {
-  const { user, profile, signOut, isAuthenticated } = useAuth(); // ✅ Ajouter user
+  const { user, profile, signOut, isAuthenticated } = useAuth();
   const { ranking } = useUserRanking(profile?.id || null);
 
   const handleSignOut = async () => {
@@ -47,7 +47,7 @@ export function Header() {
         </nav>
 
         <div className="flex items-center space-x-4">
-          {isAuthenticated ? ( // ✅ Enlever "&& profile" pour afficher même sans profil
+          {isAuthenticated ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center space-x-2 hover:bg-white/10">
@@ -58,24 +58,12 @@ export function Header() {
                   </Avatar>
                   <div className="hidden sm:flex flex-col items-start">
                     <span className="text-sm font-medium">
-                      {profile?.pseudo || user?.email || 'Utilisateur'}
+                      {user?.email || 'Utilisateur'}
                     </span>
-                    <Badge variant="secondary" className="text-xs">
-                      {ranking?.elo_rating || 400} ELO
-                    </Badge>
                   </div>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 bg-slate-900 border-slate-700">
-                <DropdownMenuItem className="flex items-center space-x-2">
-                  <User className="h-4 w-4" />
-                  <div className="flex flex-col">
-                    <span>{profile?.pseudo || user?.email || 'Utilisateur'}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {ranking ? `${ranking.games_played} parties • ${ranking.games_won} victoires` : 'Chargement...'}
-                    </span>
-                  </div>
-                </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <Link href="/profile" className="flex items-center space-x-2 cursor-pointer">
                     <User className="h-4 w-4" />
