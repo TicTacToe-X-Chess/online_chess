@@ -15,6 +15,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Chess } from 'chess.js';
 import { Input } from '@/components/ui/input';
+import React from 'react';
 
 // Import dynamique pour éviter les erreurs SSR
 const Chessboard = dynamic(() => import('react-chessboard').then(mod => mod.Chessboard), {
@@ -79,6 +80,17 @@ interface ChatMessage {
 }
 
 export default function RoomPage() {
+
+  const [finPartie, setFinPartie] = React.useState<{
+    open: boolean;
+    result: null | 'checkmate' | 'draw' | 'stalemate' | 'timeout' | 'resign';
+    winner: null | 'white' | 'black';
+  }>({
+    open: false,
+    result: null,
+    winner: null,
+  });
+
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
@@ -638,17 +650,27 @@ export default function RoomPage() {
       // ✅ AJOUT : Synchroniser avec la base de données
       saveGameMove(gameCopy.fen(), newHistory, gameCopy.turn());
 
-      // Vérifier la fin de partie
+      /* --- Fin de partie --- */
       if (gameCopy.isGameOver()) {
-        console.log('🏁 Game over!');
         if (gameCopy.isCheckmate()) {
-          const winner = gameCopy.turn() === 'w' ? 'Noirs' : 'Blancs';
-          toast.success(`Échec et mat ! Victoire des ${winner} !`);
+          setFinPartie({
+            open: true,
+            result: 'checkmate',
+            winner: gameCopy.turn() === 'w' ? 'black' : 'white', // Le gagnant est celui qui n'a pas le tour
+          });
         } else if (gameCopy.isDraw()) {
-          toast.info('Match nul !');
+          setFinPartie({
+            open: true,
+            result: 'draw',
+            winner: null,
+          });
+        } else if (gameCopy.isStalemate()) {
+          setFinPartie({
+            open: true,
+            result: 'stalemate',
+            winner: null,
+          });
         }
-      } else if (gameCopy.isCheck()) {
-        toast.warning('Échec !');
       }
 
       console.log('🎯 === MOVE ATTEMPT END ===');
@@ -1105,6 +1127,7 @@ export default function RoomPage() {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+
           {/* Plateau de jeu + historique */}
           <div className="xl:col-span-3">
             {gameStarted && room.host_id && room.guest_id && room.status === 'playing' ? (
@@ -1207,6 +1230,42 @@ export default function RoomPage() {
               </Card>
             )}
           </div>
+
+          {finPartie.open && (
+            <div
+              className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-70 z-50"
+              onClick={() => setFinPartie({ open: false, result: null, winner: null })}
+              role="dialog"
+              aria-modal="true"
+            >
+              <div
+                className="glass-effect border-white/20 w-full max-w-md p-6 rounded"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 className="text-white text-center text-2xl mb-4">
+                  {finPartie.result === 'checkmate' && `🏆 Échec et mat !`}
+                  {finPartie.result === 'draw' && `🤝 Match nul`}
+                  {finPartie.result === 'stalemate' && `🤝 Pat`}
+                  {finPartie.result === 'timeout' && `⌛ Temps écoulé`}
+                  {finPartie.result === 'resign' && `✋ Abandon`}
+                </h2>
+                <p className="text-white text-center mb-6">
+                  {(finPartie.result === 'checkmate' || finPartie.result === 'timeout' || finPartie.result === 'resign') && (
+                    `Victoire des ${finPartie.winner === 'white' ? 'Blancs ⚪' : 'Noirs ⚫'} !`
+                  )}
+                  {finPartie.result === 'draw' && 'La partie s’est terminée par un match nul.'}
+                  {finPartie.result === 'stalemate' && 'La partie s’est terminée par un pat.'}
+                </p>
+                <button
+                  className="block mx-auto px-6 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                  onClick={() => setFinPartie({ open: false, result: null, winner: null })}
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+          )}
+
 
           {/* Sidebar */}
           <div className="space-y-6">
