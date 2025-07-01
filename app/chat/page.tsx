@@ -41,7 +41,7 @@ const determineUserRole = (gameData: any, userId: string): 'white' | 'black' | '
 };
 
 export default function ChatTestPage() {
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuth(); // ✅ Récupérer loading
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -419,6 +419,22 @@ export default function ChatTestPage() {
     return <Badge variant="outline" className="text-xs border-blue-400/50 text-blue-400">Spectateur</Badge>;
   };
 
+  // ✅ AJOUT : Gestion du loading
+  if (loading) {
+    return (
+      <div className="min-h-screen">
+        <Header />
+        <div className="flex items-center justify-center py-20">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400 mx-auto mb-4"></div>
+            <p className="text-slate-400">Chargement...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ MODIFICATION : Vérifier user seulement après le loading
   if (!user) {
     return (
       <div className="min-h-screen">
@@ -435,6 +451,7 @@ export default function ChatTestPage() {
     );
   }
 
+  // ✅ Le reste du composant reste identique
   return (
     <div className="min-h-screen">
       <Header />
@@ -531,7 +548,7 @@ export default function ChatTestPage() {
 
           <CardContent className="flex-1 flex flex-col p-4">
             {/* Zone d'affichage des messages avec scroll automatique */}
-            <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-2">
+            <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-2 max-h-[400px]">
               {messages.length === 0 ? (
                 <div className="text-center py-8">
                   <MessageCircle className="h-12 w-12 text-slate-600 mx-auto mb-4" />
@@ -545,23 +562,25 @@ export default function ChatTestPage() {
                   return (
                     <div
                       key={message.id}
-                      className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'}`}
+                      className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'} w-full`} // ✅ Ajout w-full
                     >
-                      <div className={`flex items-start space-x-2 max-w-xs lg:max-w-md ${isMyMessage ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                      <div className={`flex items-start space-x-2 max-w-[70%] ${isMyMessage ? 'flex-row-reverse space-x-reverse' : ''}`}> {/* ✅ Réduction max-width */}
                         <Avatar className="h-8 w-8 flex-shrink-0">
                           <AvatarFallback className={`text-xs font-bold ${isMyMessage ? 'bg-blue-600 text-white' : 'bg-slate-600 text-white'}`}>
                             {message.sender?.pseudo?.charAt(0).toUpperCase() || 'U'}
                           </AvatarFallback>
                         </Avatar>
                         
-                        <div className={`rounded-lg p-3 ${isMyMessage ? 'bg-blue-600 text-white' : 'bg-white/10 text-white'}`}>
-                          <div className="flex items-center space-x-2 mb-1">
-                            <p className="text-sm font-medium">
+                        <div className={`rounded-lg p-3 break-words word-wrap ${isMyMessage ? 'bg-blue-600 text-white' : 'bg-white/10 text-white'}`}> {/* ✅ Ajout break-words */}
+                          <div className="flex items-center space-x-2 mb-1 flex-wrap"> {/* ✅ Ajout flex-wrap */}
+                            <p className="text-sm font-medium break-words"> {/* ✅ break-words sur le pseudo */}
                               {message.sender?.pseudo || 'Utilisateur'}
                             </p>
                             {getRoleBadge(message.id_sender)}
                           </div>
-                          <p className="text-sm">{message.content}</p>
+                          <p className="text-sm break-words whitespace-pre-wrap"> {/* ✅ break-words + whitespace-pre-wrap */}
+                            {message.content}
+                          </p>
                           <p className={`text-xs mt-1 ${isMyMessage ? 'text-blue-200' : 'text-slate-400'}`}>
                             {new Date(message.created_at).toLocaleTimeString('fr-FR', {
                               hour: '2-digit',
@@ -577,31 +596,33 @@ export default function ChatTestPage() {
             </div>
 
             {/* Formulaire d'envoi de message */}
-            <form onSubmit={sendMessage} className="flex space-x-2">
-              <Input
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder={`Tapez votre message ${userRole === 'spectator' ? '(en tant que spectateur)' : ''}...`}
-                className="flex-1 bg-white/10 border-white/20 text-white placeholder:text-slate-400"
-                disabled={isSending}
-                maxLength={500}
-              />
-              <Button
-                type="submit"
-                disabled={isSending || !newMessage.trim()}
-                className="chess-gradient hover:opacity-90"
-              >
-                {isSending ? (
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
-            </form>
+            <div className="border-t border-white/10 pt-4"> {/* ✅ Séparation visuelle */}
+              <form onSubmit={sendMessage} className="flex space-x-2">
+                <Input
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder={`Tapez votre message ${userRole === 'spectator' ? '(en tant que spectateur)' : ''}...`}
+                  className="flex-1 bg-white/10 border-white/20 text-white placeholder:text-slate-400"
+                  disabled={isSending}
+                  maxLength={500}
+                />
+                <Button
+                  type="submit"
+                  disabled={isSending || !newMessage.trim()}
+                  className="chess-gradient hover:opacity-90 flex-shrink-0" // ✅ flex-shrink-0
+                >
+                  {isSending ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </form>
 
-            <p className="text-xs text-slate-500 mt-2">
-              Limite de 500 caractères • Chat public visible par tous les participants
-            </p>
+              <p className="text-xs text-slate-500 mt-2">
+                Limite de 500 caractères • Chat public visible par tous les participants
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>

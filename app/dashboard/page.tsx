@@ -403,10 +403,10 @@ export default function DashboardPage() {
       console.log('🎉 Step 4: Success! Redirecting...');
       toast.success('Vous avez rejoint la partie ! 🎯');
 
-      console.log('🔄 Redirecting to room:', `/rooms/${roomId}`);
+      console.log('🔄 Redirecting to room:', `/room/${roomId}`);
       
       // Redirection immédiate avec Next.js router
-      router.push(`/rooms/${roomId}`);
+      router.push(`/room/${roomId}`);
 
     } catch (error) {
       console.error('💥 Exception in joinRoom:', error);
@@ -492,10 +492,10 @@ export default function DashboardPage() {
       console.log('✅ Successfully joined as spectator');
       toast.success('Vous regardez maintenant cette partie ! 👀');
       
-      console.log('🔄 Redirecting to room as spectator:', `/rooms/${roomId}`);
+      console.log('🔄 Redirecting to room as spectator:', `/room/${roomId}`);
       
       // Redirection immédiate avec Next.js router
-      router.push(`/rooms/${roomId}`);
+      router.push(`/room/${roomId}`);
 
     } catch (error) {
       console.error('💥 Exception in joinAsSpectator:', error);
@@ -920,7 +920,7 @@ export default function DashboardPage() {
 
                           {/* Bouton pour l'hôte */}
                           {isUserHost && (
-                            <Link href={`/rooms/${room.id}`}>
+                            <Link href={`/room/${room.id}`}>
                               <Button
                                 size="sm"
                                 className="chess-gradient hover:opacity-90 min-w-[100px] text-xs"
@@ -933,7 +933,7 @@ export default function DashboardPage() {
 
                           {/* Bouton pour un participant existant */}
                           {hasUserRole && !isUserHost && (
-                            <Link href={`/rooms/${room.id}`}>
+                            <Link href={`/room/${room.id}`}>
                               <Button
                                 size="sm"
                                 className="chess-gradient hover:opacity-90 min-w-[100px] text-xs"
